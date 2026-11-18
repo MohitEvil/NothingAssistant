@@ -1,0 +1,53 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Add offline neural voice library (sherpa-onnx)
+        run: bash scripts/fetch-sherpa.sh
+
+      - name: Add Needle 3 tool-calling model (optional)
+        continue-on-error: true
+        run: bash scripts/fetch-needle.sh
+
+      - name: Make wrapper executable
+        run: chmod +x ./gradlew
+
+      # Needle's native engine is tried first. If it can't link, the same build runs again without it.
+      - name: Build release APK
+        run: |
+          if [ -f app/src/main/cpp/libs/libcactus.a ]; then
+            ./gradlew assembleRelease --no-daemon -PwithNeedle=true || { echo "::warning::Needle engine did not link; building without it"; rm -f app/src/main/assets/needle3.cact; ./gradlew clean assembleRelease --no-daemon; }
+          else
+            ./gradlew assembleRelease --no-daemon
+          fi
+
+      - name: Build debug APK
+        run: |
+          if [ -f app/src/main/cpp/libs/libcactus.a ] && [ -f app/src/main/assets/needle3.cact ]; then
+            ./gradlew assembleDebug --no-daemon -PwithNeedle=true || { rm -f app/src/main/assets/needle3.cact; ./gradlew clean assembleDebug --no-daemon; }
+          else
+            ./gradlew assembleDebug --no-daemon
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nothing-Assistant-APKs
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/*.apk
