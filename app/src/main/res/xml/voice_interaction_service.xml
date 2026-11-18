@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.demon.nothingassistant.voice.NothingSessionService"
+    android:recognitionService="com.demon.nothingassistant.voice.NothingRecognitionService"
+    android:settingsActivity="com.demon.nothingassistant.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true"
+    android:supportsLocalInteraction="false" />

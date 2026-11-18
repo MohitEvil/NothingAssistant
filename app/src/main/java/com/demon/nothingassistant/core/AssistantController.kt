@@ -1,0 +1,842 @@
+package com.demon.nothingassistant.core
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.SystemClock
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.core.content.ContextCompat
+import com.demon.nothingassistant.MainActivity
+import com.demon.nothingassistant.PanelActivity
+import com.demon.nothingassistant.action.ActionEngine
+import com.demon.nothingassistant.action.ActionResult
+import com.demon.nothingassistant.action.ContactLookup
+import com.demon.nothingassistant.ai.Brain
+import com.demon.nothingassistant.ai.SmallTalk
+import com.demon.nothingassistant.ai.Turn
+import com.demon.nothingassistant.audio.SpeechEngine
+import com.demon.nothingassistant.audio.NeuralVoice
+import com.demon.nothingassistant.audio.VoiceCatalog
+import com.demon.nothingassistant.audio.VoiceHub
+import com.demon.nothingassistant.data.Settings
+import com.demon.nothingassistant.debug.AppLog
+import com.demon.nothingassistant.feedback.HapticController
+import com.demon.nothingassistant.intent.Affirmation
+import com.demon.nothingassistant.intent.Command
+import com.demon.nothingassistant.intent.IntentEngine
+import com.demon.nothingassistant.intent.Wrapup
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+/**
+ * Single source of truth for assistant state.
+ *
+ * IDLE -> LISTENING -> RECOGNIZING -> THINKING -> one of:
+ *   EXECUTING -> SUCCESS | FAILURE                      (phone command)
+ *   CONFIRMING (spoken question, listens for yes/no)    (needs a yes first)
+ *   SPEAKING (answer) -> LISTENING again for a follow-up (conversation)
+ */
+class AssistantController(private val context: Context, val settings: Settings) {
+
+    private enum class Mode { COMMAND, FOLLOWUP, CONFIRM }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val haptics = HapticController(context, settings)
+    val actions = ActionEngine(context)
+        .also { it.musicApp = { settings.musicApp }; it.videoApp = { settings.videoApp }; it.brainProvider = { brain } }
+    /** Offline neural voice, with the device voice as a fallback. Also used by the Voice settings screen. */
+    val voice = VoiceHub(context, settings)
+    private val brain = Brain(settings)
+    private val planner = com.demon.nothingassistant.agent.Planner(context, brain)
+
+    /** True while the window stays open between tasks (the "stay open" setting). */
+    private var inSession = false
+    private var sessionBlank = 0
+
+    private val _ui = MutableStateFlow(UiState())
+    val ui: StateFlow<UiState> = _ui.asStateFlow()
+
+    /**
+     * Smoothed microphone level, 0..1. Kept as Compose state that is only read while drawing,
+     * so updating it redraws the glyph without recomposing any layout.
+     */
+    val amplitude = mutableFloatStateOf(0f)
+
+    private var workJob: Job? = null
+    private var resetJob: Job? = null
+    private var speakJob: Job? = null
+
+    /** Bumped whenever a new flow starts, so late callbacks from an older flow are ignored. */
+    private var flow = 0
+    private var mode = Mode.COMMAND
+    private var micActive = false
+    private var retried = false
+    private var lastRmsAt = 0L
+    private var engineRetries = 0
+    private var lastActive = 0L
+    /** True right after "anything else?", so a bare yes / no / stop is read as an answer to it. */
+    private var awaitingMore = false
+
+    /** Saved on the phone: survives restarts, so follow-ups keep their context. */
+    private val history = com.demon.nothingassistant.ai.ChatHistory(context)
+    private var confirmTries = 0
+
+    private val speech: SpeechEngine = SpeechEngine(context, object : SpeechEngine.Listener {
+        override fun onPartial(text: String) {
+            if (!micActive) return
+            if (mode == Mode.CONFIRM) {
+                _ui.update { it.copy(transcript = text) }
+            } else {
+                transition(AssistantState.RECOGNIZING, "Processing your speech…", text, micOpen = true)
+            }
+        }
+
+        override fun onFinal(text: String) {
+            if (!micActive) return
+            micActive = false
+            amplitude.floatValue = 0f
+            when (mode) {
+                Mode.COMMAND -> if (text.isBlank()) noMatch() else heard(text)
+                Mode.FOLLOWUP -> if (text.isBlank()) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else { sessionBlank = 0; heard(text) }
+                Mode.CONFIRM -> if (text.isBlank() && relistenConfirm()) Unit else handleConfirmAnswer(text)
+            }
+        }
+
+        override fun onRms(db: Float) {
+            if (!micActive || _ui.value.state != AssistantState.LISTENING) return
+            val now = SystemClock.uptimeMillis()
+            if (now - lastRmsAt < 60) return // ~16 updates per second is plenty
+            lastRmsAt = now
+            val level = ((db + 2f) / 12f).coerceIn(0f, 1f)
+            amplitude.floatValue = amplitude.floatValue * 0.55f + level * 0.45f
+        }
+
+        override fun onError(code: Int) {
+            if (!micActive) return
+            // The recognition service dropped (client error, too many requests, server disconnected).
+            // Rebuild the recognizer and try again quietly, up to twice.
+            if ((code == 5 || code == 10 || code == 11) && engineRetries < 2) {
+                engineRetries++
+                val token = flow
+                speech.release()
+                scope.launch {
+                    delay(400)
+                    if (micActive && token == flow) speech.start(settings.language, settings.preferOffline)
+                }
+                return
+            }
+            micActive = false
+            amplitude.floatValue = 0f
+            val silent = code == 6 || code == 7 // SPEECH_TIMEOUT, NO_MATCH
+            when (mode) {
+                Mode.COMMAND -> if (silent) noMatch() else fail(errorMessage(code))
+                Mode.FOLLOWUP -> if (silent) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else fail(errorMessage(code))
+                Mode.CONFIRM -> {
+                    val pending = _ui.value.pending
+                    if (silent && pending != null) { if (!relistenConfirm()) decline(pending) } else fail(errorMessage(code))
+                }
+            }
+        }
+    })
+
+    private fun errorMessage(code: Int) = when (code) {
+        8 -> "The recognizer is busy. Try again in a moment."
+        9 -> "Microphone permission needed."
+        1, 2, 4 -> "Speech recognition needs internet right now. Try again online."
+        5, 10, 11 -> "The speech service dropped. Tap the glyph to try again."
+        12, 13 -> "That language isn't available offline. Pick another in Settings."
+        SpeechEngine.ERROR_UNAVAILABLE -> "No speech recognition service found on this phone."
+        else -> "Speech error ($code). Tap to try again."
+    }
+
+    // ---- Public controls ----
+
+    fun hasMicPermission(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    /** Tap on the glyph: start from rest, finish speaking, interrupt the answer, or answer a question. */
+    fun onGlyphTap() {
+        when (_ui.value.state) {
+            AssistantState.IDLE, AssistantState.SUCCESS, AssistantState.FAILURE -> startListening()
+            AssistantState.LISTENING, AssistantState.RECOGNIZING -> speech.stopListening()
+            AssistantState.SPEAKING -> beginListening(Mode.FOLLOWUP) // barge-in: stop talking, listen
+            AssistantState.CONFIRMING ->
+                if (micActive) speech.stopListening() else beginListening(Mode.CONFIRM)
+            else -> Unit
+        }
+    }
+
+    /** Starts a new request. The recent conversation is kept for two minutes so follow-ups still make sense. */
+    fun startListening() {
+        beginListening(Mode.COMMAND)
+    }
+
+    /** Cancel from any state; always releases the microphone and silences the voice. */
+    fun cancel() {
+        stopEverything()
+        if (_ui.value.state != AssistantState.IDLE) haptics.cancel()
+        transition(AssistantState.IDLE, "", "")
+    }
+
+    /** Called when the screen goes away: stop the mic and any spoken answer, keep finished results. */
+    fun onUiHidden() {
+        when (_ui.value.state) {
+            AssistantState.LISTENING, AssistantState.RECOGNIZING, AssistantState.THINKING,
+            AssistantState.SPEAKING, AssistantState.CONFIRMING -> {
+                stopEverything()
+                speech.release()
+                transition(AssistantState.IDLE, "", "")
+            }
+            else -> Unit
+        }
+    }
+
+    /** "Continue" button on the confirmation card. */
+    fun confirmPending() {
+        val pending = _ui.value.pending ?: return
+        silenceInput()
+        runPending(pending)
+    }
+
+    /** "Cancel" button on the confirmation card. */
+    fun dismissPending() {
+        val pending = _ui.value.pending
+        silenceInput()
+        if (pending != null) decline(pending) else cancel()
+    }
+
+    /** Used by the Test buttons in Settings: asks the AI one thing and returns its answer or the error. */
+    suspend fun fetchModels(p: com.demon.nothingassistant.data.Provider): Result<List<String>> = brain.fetchModels(p)
+
+    fun modelAlwaysThinks(p: com.demon.nothingassistant.data.Provider): Boolean = brain.alwaysThinks(p)
+
+    /** Tests one provider on its own (no fallback), so the result says exactly which one works. */
+    suspend fun fetchVoiceModels(p: com.demon.nothingassistant.data.Provider) = voice.fetchCloudModels(p)
+    suspend fun fetchVoiceVoices(p: com.demon.nothingassistant.data.Provider) = voice.fetchCloudVoices(p)
+
+    suspend fun testVoiceProvider(p: com.demon.nothingassistant.data.Provider): String = voice.testCloud(p)
+
+    suspend fun testProvider(p: com.demon.nothingassistant.data.Provider): String {
+        if (!p.ready) return "Fill in the API key, address and model first."
+        val r = brain.askOne(p, emptyList(), "Say hello in five words.")
+        return r.getOrNull() ?: (r.exceptionOrNull()?.message ?: "No answer.")
+    }
+
+    suspend fun testAi(prompt: String): String {
+        if (!settings.aiEnabled) return "AI chat is switched off."
+        if (!brain.configured()) return "Add an API key first."
+        val result = brain.ask(emptyList(), prompt)
+        return result.getOrNull() ?: (result.exceptionOrNull()?.message ?: "No answer.")
+    }
+
+    // ---- Listening ----
+
+    private fun beginListening(m: Mode) {
+        resetJob?.cancel()
+        workJob?.cancel()
+        speakJob?.cancel()
+        voice.stop()
+        flow++
+        if (!hasMicPermission()) {
+            fail("Microphone permission needed.")
+            return
+        }
+        mode = m
+        retried = false
+        engineRetries = 0
+        amplitude.floatValue = 0f
+        when (m) {
+            Mode.CONFIRM -> _ui.update { it.copy(micOpen = true, transcript = "") } // keep the question on screen
+            Mode.COMMAND -> transition(AssistantState.LISTENING, "Speak naturally…", "", micOpen = true)
+            Mode.FOLLOWUP -> transition(AssistantState.LISTENING, "Go ahead, I'm listening…", "", micOpen = true)
+        }
+        haptics.lightTap()
+        micActive = true
+        com.demon.nothingassistant.audio.Cue.listening()
+        speech.start(settings.language, settings.preferOffline)
+    }
+
+    private fun noMatch() {
+        if (!retried) {
+            retried = true
+            transition(AssistantState.LISTENING, "Didn't catch that. Listening again…", "", micOpen = true)
+            micActive = true
+            scope.launch {
+                delay(150)
+                if (micActive && _ui.value.state == AssistantState.LISTENING) {
+                    speech.start(settings.language, settings.preferOffline)
+                }
+            }
+        } else {
+            fail("Didn't catch that. Tap the glyph to try again.")
+        }
+    }
+
+    private fun heard(text: String) {
+        haptics.veryLightTap()
+        process(text)
+    }
+
+    /** Stops the microphone and the voice without changing what is on screen. */
+    private fun silenceInput() {
+        flow++
+        speakJob?.cancel()
+        speech.cancel()
+        micActive = false
+        amplitude.floatValue = 0f
+        voice.stop()
+    }
+
+    private fun stopEverything() {
+        resetJob?.cancel()
+        workJob?.cancel()
+        silenceInput()
+    }
+
+    // ---- Understanding and doing ----
+
+    private fun process(raw: String) {
+        val awaiting = awaitingMore
+        awaitingMore = false
+        // Dictating a notification reply: "ok" or "thanks" may be the reply itself, never an exit.
+        if (com.demon.nothingassistant.intent.NotifyState.active()) { runCommand(raw); return }
+        if (com.demon.nothingassistant.intent.DictState.active()) {
+            if (com.demon.nothingassistant.intent.DictState.isCancel(raw)) {
+                com.demon.nothingassistant.intent.DictState.clear()
+                success("Okay, cancelled.", raw)
+            } else {
+                val cmd = com.demon.nothingassistant.intent.DictState.finish(raw)
+                workJob?.cancel(); flow++
+                workJob = scope.launch { execute(cmd, raw) }
+            }
+            return
+        }
+        if (inSession && Wrapup.endsSession(raw)) {
+            if (Wrapup.isThanks(raw)) {
+                val reply = Wrapup.welcome.random()
+                val token = ++flow
+                transition(AssistantState.SPEAKING, "", raw, reply = reply)
+                say(reply) { if (token == flow) closeConversation() }
+            } else closeConversation()
+            return
+        }
+        when (val w = Wrapup.classify(raw, awaiting)) {
+            Wrapup.Result.Dismiss -> {
+                // "Close the app" outside a wrap-up means go home; inside one it just ends the chat.
+                if (!awaiting && IntentEngine.parse(raw) is Command.GlobalAction) runCommand(raw) else closeConversation()
+                return
+            }
+            Wrapup.Result.Yes -> { beginListening(Mode.FOLLOWUP); return }
+            Wrapup.Result.Thanks -> { thanksReply(raw); return }
+            is Wrapup.Result.Rest -> runCommand(w.text)
+        }
+    }
+
+    /** "No", "that's all", "stop listening", "close": stop the mic and close the panel. */
+    private fun closeConversation() {
+        stopEverything()
+        com.demon.nothingassistant.audio.Cue.closing()
+        haptics.veryLightTap()
+        transition(AssistantState.IDLE, "", "")
+    }
+
+    /** "Thanks": answer politely, ask if there is more, and listen for the answer. */
+    private fun thanksReply(heard: String) {
+        val reply = Wrapup.welcome.random() + " " + Wrapup.askMore.random()
+        val token = ++flow
+        transition(AssistantState.SPEAKING, "", heard, reply = reply)
+        haptics.veryLightTap()
+        say(reply) { if (token == flow) listenForMore() }
+    }
+
+    private fun listenForMore() {
+        if (hasMicPermission()) {
+            awaitingMore = true
+            beginListening(Mode.FOLLOWUP)
+        } else {
+            endQuiet()
+        }
+    }
+
+    /** Speech recognition often mishears. If the top guess isn't a command, try the other guesses it offered. */
+    private fun bestParse(text: String): Command {
+        val first = IntentEngine.parse(text)
+        if (first !is Command.Unknown && first !is Command.Question) return first
+        for (alt in speech.alternatives) {
+            if (alt.equals(text, ignoreCase = true)) continue
+            val c = IntentEngine.parse(alt)
+            if (c !is Command.Unknown && c !is Command.Question) return c
+        }
+        return first
+    }
+
+    /** Runs a scheduled task by itself: no panel, the result is spoken. */
+    fun runScheduled(text: String) {
+        scope.launch {
+            val cmd = IntentEngine.parse(text)
+            if (cmd is Command.Unknown || cmd is Command.Question) {
+                if (settings.speakReplies && voice.available) voice.speak("Scheduled task: $text. I couldn't work out how to do it.") {}
+                return@launch
+            }
+            val quiet = cmd is Command.Say || cmd is Command.News || cmd is Command.Weather || cmd is Command.KeepAwake
+            if (!quiet) runCatching {
+                val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                @Suppress("DEPRECATION")
+                pm.newWakeLock(android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP, "nothing:macro").acquire(8000)
+                delay(900)
+            }
+            when (val r = actions.runSuspend(cmd)) {
+                is ActionResult.Success -> {
+                    val go = r.launch
+                    if (settings.speakReplies && voice.available && (quiet || go == null)) voice.speak(r.message) { go?.invoke() }
+                    else go?.invoke()
+                }
+                is ActionResult.Failure -> if (settings.speakReplies && voice.available) voice.speak(r.message) {}
+                is ActionResult.Confirm -> {}
+            }
+        }
+    }
+
+    private val chatty = Regex("^(?:hi|hello|hey|yo|thanks|thank you|good (?:morning|night|evening|afternoon)|how are you|how r u|who are you|what'?s your name|tell me a joke|i love you|i'?m (?:sad|bored|tired)|are you there|nice|great|cool|awesome|lol)\\b", RegexOption.IGNORE_CASE)
+    private val forgetChat = Regex("^(?:clear|forget|delete|erase|reset)\\s+(?:our |the |my |all )?(?:chat |conversation |assistant )?(?:history|conversation|chat)$", RegexOption.IGNORE_CASE)
+
+    private fun stepCount(c: Command): Int = if (c is Command.Chain) c.steps.size else 1
+
+    /**
+     * The hybrid brain: Needle 3 (offline) -> cloud AI (if it's on) -> fixed grammar -> a plain answer.
+     * Needle and the cloud can plan several steps, waits included. The grammar is the safety net that always works offline,
+     * and it still wins over a Needle guess that is unsure and does less than the grammar understood.
+     */
+    /**
+     * Three speed tiers, cheapest first:
+     *  1. Android intents and system APIs in Kotlin (call, alarm, toggles, volume, open app...): 0 ms, no model.
+     *  2. The Kotlin fast router: one tap / scroll / type on screen, matched by fuzzy text and synonyms: milliseconds, no model.
+     *  3. Anything multi-step or unclear: Needle 3 on the phone -> your cloud AI (if on) -> the grammar's chain -> a plain answer.
+     * Needle 3 is kept for ambiguous or multi-step requests, where it helps most.
+     */
+    private suspend fun route(text: String, grammar: Command): Command? {
+        val known = grammar !is Command.Unknown && grammar !is Command.Question
+        if (chatty.containsMatchIn(text.trim()) && !known) return null
+        // Tier 1 and 2
+        val vagueOpen = grammar is Command.OpenApp && (grammar.name.trim().split(Regex("\\s+")).size >= 3 || grammar.name.trim().startsWith("my ", true))
+        if (known && grammar !is Command.Chain && grammar !is Command.Task && !vagueOpen) { AppLog.d("route", "tier1/2 ${grammar.javaClass.simpleName}"); return grammar }
+        // Tier 3: Needle 3
+        val n = runCatching { planner.needle(text) }.getOrNull()
+        if (n != null) {
+            val better = !known || n.confidence >= 0.8 || stepCount(n.command) > stepCount(grammar)
+            if (better) { AppLog.d("route", "needle"); return n.command }
+        }
+        // then the cloud AI, only when the grammar didn't fully understand, or the request is long or has several steps
+        val long = text.trim().split(Regex("\\s+")).size >= 9
+        if (brain.configured() && (!known || grammar is Command.Chain || long)) {
+            transition(AssistantState.THINKING, "Planning…", text)
+            val c = runCatching { planner.cloud(text, history.recent()) }.getOrNull()
+            if (c != null) { AppLog.d("route", "cloud"); return c.command }
+        }
+        if (known) { AppLog.d("route", "grammar"); return grammar }
+        return null
+    }
+
+    private fun runCommand(text: String) {
+        workJob?.cancel()
+        flow++
+        lastActive = SystemClock.uptimeMillis()
+        workJob = scope.launch {
+            transition(AssistantState.THINKING, "Understanding your request…", text)
+            if (forgetChat.matches(text.trim())) {
+                history.clear()
+                success("Done. I've cleared our chat history.", text)
+                return@launch
+            }
+            val grammar = bestParse(text)
+            if (grammar is Command.Question) { chat(text, question = true); return@launch }
+            val plan = route(text, grammar)
+            when {
+                plan == null -> chat(text, question = false)
+                plan is Command.SendSms -> prepareSms(plan, text)
+                else -> execute(plan, text)
+            }
+        }
+    }
+
+    private suspend fun execute(cmd: Command, text: String) {
+        haptics.lightTap()
+        if (actions.isSlow(cmd)) transition(AssistantState.EXECUTING, cmd.describe(), text)
+        when (val result = actions.runSuspend(cmd)) {
+            is ActionResult.Success -> {
+                val launch = result.launch
+                history.addPair(text, result.message.ifBlank { "Done." }, "action")
+                if (startsPlayback(cmd)) { playAndClose(launch); return }
+                if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
+                else successLaunching(result.message, text, launch)
+            }
+            is ActionResult.Failure -> { history.addPair(text, result.message, "action"); fail(result.message, text, session = true) }
+            is ActionResult.Confirm -> askConfirm(
+                PendingConfirm(
+                    title = result.title,
+                    detail = result.detail,
+                    spoken = result.spoken,
+                    command = result.command,
+                    declineMessage = result.declineMessage,
+                    declineAsFailure = result.declineAsFailure
+                ),
+                text
+            )
+        }
+    }
+
+    private fun prepareSms(cmd: Command.SendSms, text: String) {
+        when (val r = actions.findContact(cmd.recipient)) {
+            is ContactLookup.Found -> {
+                val c = r.contact
+                val who = if (c.name == c.number) c.number else c.name
+                askConfirm(
+                    PendingConfirm(
+                        title = "Send this message?",
+                        detail = "To $who\n“${cmd.body}”",
+                        spoken = "Message to $who: ${cmd.body}. Should I open it in Messages?",
+                        command = Command.ComposeSms(c.number, c.name, cmd.body),
+                        declineMessage = "Okay, I won't send it.",
+                        declineAsFailure = false
+                    ),
+                    text
+                )
+            }
+            is ContactLookup.Fuzzy -> askConfirm(
+                PendingConfirm(
+                    title = "Message ${r.contact.name}?",
+                    detail = "I couldn't find “${cmd.recipient}”. Closest match is ${r.contact.name}.",
+                    spoken = "Do you mean ${r.contact.name}?",
+                    command = Command.SendSms(r.contact.name, cmd.body),
+                    declineMessage = "Okay. I won't message anyone.",
+                    declineAsFailure = false
+                ),
+                text
+            )
+            ContactLookup.NoPermission -> fail("Allow Contacts access to message by name.", text)
+            ContactLookup.NotFound -> fail("I couldn't find “${cmd.recipient}” in your contacts.", text)
+        }
+    }
+
+    // ---- Conversation ----
+
+    private suspend fun chat(text: String, question: Boolean) {
+        // Conversation about the conversation: uses the saved history instead of a search.
+        val t = text.trim().trimEnd('.', '!', '?')
+        if (Regex("^(?:repeat that|repeat|say that again|say it again|what did you say|come again|can you repeat that)$", RegexOption.IGNORE_CASE).matches(t)) {
+            history.lastReply()?.let { respond(text, it); return }
+        }
+        if (Regex("^what (?:did i|was i) (?:just )?(?:ask|say|asking)(?: you)?(?: before)?$", RegexOption.IGNORE_CASE).matches(t)) {
+            history.lastChatQuestion()?.let { respond(text, "You asked: $it"); return }
+        }
+        if (com.demon.nothingassistant.action.WebInfo.isMore(t)) {
+            com.demon.nothingassistant.action.WebInfo.more()?.let { remember(text, it); respond(text, it); return }
+        }
+        // Questions about the phone and the assistant, chit-chat, moods, jokes and maths are answered offline, instantly.
+        // The AI is only for real knowledge questions, and only when it's switched on and set up.
+        val small = com.demon.nothingassistant.ai.Knowledge.answer(text, brain.configured())
+            ?: SmallTalk.reply(text, settings.userName) { settings.setUserName(it) }
+        if (small != null) {
+            remember(text, small)
+            respond(text, small)
+            return
+        }
+        if (brain.configured()) {
+            transition(AssistantState.THINKING, "Thinking…", text)
+            val reply = brain.ask(history.recent(), text).getOrNull()
+            if (reply != null) {
+                remember(text, reply)
+                respond(text, reply)
+                return
+            }
+        }
+        // AI chat is off: look it up on the web instead (quick, no key needed).
+        if (text.trim().split(Regex("\\s+")).size >= 2) {
+            transition(AssistantState.THINKING, "Searching the web…", text)
+            val web = com.demon.nothingassistant.action.WebInfo.answer(text, history.lastChatQuestion())
+            if (web != null) {
+                remember(text, web)
+                respond(text, web)
+                return
+            }
+        }
+        // No answer I can give: decline gently and invite something else.
+        respond(text, SmallTalk.fallback(question))
+    }
+
+    private fun remember(user: String, reply: String) = history.addPair(user, reply, "chat")
+
+    /** Shows and speaks an answer, then opens the mic again for a follow-up. */
+    private fun respond(text: String, reply: String) {
+        val token = ++flow
+        transition(AssistantState.SPEAKING, "", text, reply = reply)
+        haptics.veryLightTap()
+        say(reply) { if (token == flow) afterReply() }
+    }
+
+    private fun afterReply() {
+        lastActive = SystemClock.uptimeMillis()
+        if ((settings.followUp || settings.stayOpen) && hasMicPermission()) {
+            speakJob = scope.launch {
+                delay(250)
+                beginListening(Mode.FOLLOWUP)
+            }
+        } else {
+            resetJob = scope.launch {
+                delay(600)
+                if (_ui.value.state == AssistantState.SPEAKING) transition(AssistantState.IDLE, "", "")
+            }
+        }
+    }
+
+    /** No spoken follow-up needed: the conversation just ends and the screen closes. */
+    private fun endQuiet() {
+        flow++
+        lastActive = SystemClock.uptimeMillis()
+        transition(AssistantState.IDLE, "", "")
+    }
+
+    // ---- Confirmations ----
+
+    /** A quiet or unclear answer to a question is not a "no": listen again, up to twice, before giving up. */
+    private fun relistenConfirm(): Boolean {
+        if (_ui.value.pending == null || confirmTries >= 2) return false
+        confirmTries++
+        beginListening(Mode.CONFIRM)
+        return true
+    }
+
+    private fun askConfirm(pending: PendingConfirm, text: String) {
+        confirmTries = 0
+        val token = ++flow
+        transition(AssistantState.CONFIRMING, "", text, pending = pending)
+        haptics.lightTap()
+        // With voice on, ask out loud, then listen for yes / no. Otherwise the buttons do the job.
+        if (settings.speakReplies && voice.available) {
+            voice.speak(pending.spoken) { if (token == flow) beginListening(Mode.CONFIRM) }
+        }
+    }
+
+    private fun handleConfirmAnswer(text: String) {
+        val pending = _ui.value.pending
+        if (pending == null) {
+            endQuiet()
+            return
+        }
+        haptics.veryLightTap()
+        when (Affirmation.classify(text)) {
+            Affirmation.Answer.YES -> runPending(pending)
+            Affirmation.Answer.NO -> decline(pending)
+            Affirmation.Answer.OTHER -> {
+                // Maybe they just gave a new command ("open YouTube"). Otherwise treat it as not agreeing.
+                val c = IntentEngine.parse(text)
+                if (c !is Command.Unknown && c !is Command.Question) process(text)
+                else if (!relistenConfirm()) decline(pending)
+            }
+        }
+    }
+
+    private fun runPending(pending: PendingConfirm) {
+        workJob?.cancel()
+        flow++
+        val text = _ui.value.transcript
+        workJob = scope.launch {
+            val c = pending.command
+            if (c is Command.SendSms) prepareSms(c, text) else execute(c, text)
+        }
+    }
+
+    private fun decline(pending: PendingConfirm) {
+        if (pending.declineAsFailure) {
+            fail(pending.declineMessage)
+        } else {
+            flow++
+            haptics.cancel()
+            speakStatus(pending.declineMessage)
+            transition(AssistantState.IDLE, "", "")
+        }
+    }
+
+    // ---- Results ----
+
+    /** Commands that put another app in front, where the mic can't keep listening. */
+    private fun opensAnotherApp(c: Command) = c is Command.Screen || c is Command.Search || c is Command.Navigate || c is Command.Call ||
+        c is Command.ComposeSms || c === Command.Camera || c is Command.OpenSettings || c is Command.OpenSetting ||
+        c is Command.OpenUrl || c is Command.Email || c is Command.AddEvent || c === Command.Wallpaper ||
+        c === Command.ShowAlarms || c is Command.OpenApp || c is Command.LaunchPackage || c is Command.PlayMusic ||
+        c is Command.UiTap || c is Command.UiFind || c is Command.UiType || c is Command.UiScroll || c is Command.GlobalAction || c === Command.ReadScreen
+
+    /** Starting a song or video: the music is the answer, so stop listening and get out of the way. */
+    private fun startsPlayback(c: Command): Boolean = c is Command.PlayMusic || c is Command.PlayIn || c is Command.UiPlayRandom ||
+        (c is Command.Chain && c.steps.any { startsPlayback(it) })
+
+    private fun playAndClose(launch: (() -> Unit)?) {
+        stopEverything()
+        inSession = false
+        awaitingMore = false
+        haptics.success()
+        launch?.invoke()
+        transition(AssistantState.IDLE, "", "")
+    }
+
+    private fun success(message: String, transcript: String, askMore: Boolean = false) {
+        val token = ++flow
+        transition(AssistantState.SUCCESS, message, transcript)
+        haptics.success()
+        if (settings.stayOpen && hasMicPermission()) {
+            // Say what was done, then keep the window open and wait for the next task.
+            say(message) { if (token == flow) continueSession() }
+            return
+        }
+        if (askMore && settings.followUp && settings.speakReplies && voice.available && hasMicPermission()) {
+            // Say what was done, then ask if there is anything else, then listen.
+            voice.speak(message) {
+                if (token != flow) return@speak
+                val question = Wrapup.askMore.random()
+                val t2 = ++flow
+                transition(AssistantState.SPEAKING, "", transcript, reply = question)
+                voice.speak(question) { if (t2 == flow) listenForMore() }
+            }
+            return
+        }
+        speakStatus(message)
+        scheduleIdle(1800)
+    }
+
+    /** Shows and speaks the reply, and starts the action (opening an app) the moment the voice begins, so the two line up. */
+    private fun successLaunching(message: String, transcript: String, launch: () -> Unit) {
+        flow++
+        transition(AssistantState.SUCCESS, message, transcript)
+        haptics.success()
+        val fired = java.util.concurrent.atomic.AtomicBoolean(false)
+        val keepOpen = settings.stayOpen && hasMicPermission()
+        val token = flow
+        val go = {
+            if (fired.compareAndSet(false, true)) {
+                launch()
+                // Bring the panel back while the app is still opening, so it is already there when the voice finishes.
+                if (keepOpen) scope.launch {
+                    delay(450)
+                    if (token == flow && !MainActivity.resumed && PanelActivity.current == null) PanelActivity.show(context)
+                }
+            }
+        }
+        if (settings.speakReplies && voice.available) {
+            voice.speak(message, { go() }, { if (keepOpen && token == flow) continueSession() })
+            scope.launch {
+                delay(350) // never hold the action back longer than this if the voice is slow to start
+                go()
+            }
+        } else {
+            go()
+            if (keepOpen) scope.launch { delay(900); if (token == flow) continueSession() }
+        }
+        if (!keepOpen) scheduleIdle(1800)
+    }
+
+    /** Between tasks: put the window back over the current app if it was hidden, and listen for the next instruction. */
+    private fun continueSession() {
+        inSession = true
+        val t = ++flow
+        speakJob?.cancel()
+        speakJob = scope.launch {
+            if (!MainActivity.resumed && PanelActivity.current == null) {
+                PanelActivity.show(context)
+                var waited = 0
+                while (PanelActivity.current == null && waited < 1000) { delay(30); waited += 30 }
+                delay(40)
+            }
+            if (t == flow) beginListening(Mode.FOLLOWUP)
+        }
+    }
+
+    private fun fail(message: String, transcript: String = _ui.value.transcript, session: Boolean = false) {
+        val token = ++flow
+        transition(AssistantState.FAILURE, message, transcript)
+        haptics.failure()
+        if (session && settings.stayOpen && hasMicPermission()) {
+            // Say what went wrong, then stay open so the user can say what to do next.
+            say(message) { if (token == flow) continueSession() }
+            return
+        }
+        speakStatus(message)
+        scheduleIdle(3200)
+    }
+
+    /** Speaks a short status line if voice replies are on. Never starts a follow-up. */
+    private fun speakStatus(message: String) {
+        if (settings.speakReplies && voice.available) voice.speak(message) {}
+    }
+
+    /** Speaks [text] (or, with voice off, waits roughly as long as it takes to read) and then runs [then]. */
+    private fun say(text: String, then: () -> Unit) {
+        if (settings.speakReplies && voice.available) {
+            voice.speak(text, then)
+        } else {
+            speakJob = scope.launch {
+                delay(minOf(8000L, 1500L + text.length * 35L))
+                then()
+            }
+        }
+    }
+
+    private fun scheduleIdle(ms: Long) {
+        resetJob?.cancel()
+        resetJob = scope.launch {
+            delay(ms)
+            var waited = 0L
+            while (voice.isSpeaking && waited < 6000) { // let a spoken status finish
+                delay(150)
+                waited += 150
+            }
+            val s = _ui.value.state
+            if (s == AssistantState.SUCCESS || s == AssistantState.FAILURE) {
+                transition(AssistantState.IDLE, "", "")
+            }
+        }
+    }
+
+    init {
+        actions.onProgress = { status -> transition(AssistantState.EXECUTING, status, _ui.value.transcript) }
+        actions.announce = { msg -> if (settings.speakReplies && voice.available) voice.speak(msg) {} }
+        voice.onNeuralReady = { prewarmVoice() }
+        if (voice.neural.phase == NeuralVoice.Phase.READY) prewarmVoice()
+    }
+
+    /** Renders the short fixed replies (and "Opening <app>.") ahead of time so they start with no wait. */
+    private fun prewarmVoice() {
+        val model = voice.selectedModel()
+        val apps = actions.appLabels().take(if (model?.heavy == true) 100 else 60).map { "Opening $it." }
+        voice.prewarm(VoiceCatalog.staticPhrases + Wrapup.askMore + Wrapup.welcome + apps)
+    }
+
+    private fun transition(
+        state: AssistantState,
+        status: String,
+        transcript: String,
+        pending: PendingConfirm? = null,
+        reply: String = "",
+        micOpen: Boolean = false
+    ) {
+        if (state == AssistantState.IDLE) { inSession = false; sessionBlank = 0 }
+        _ui.update {
+            UiState(
+                state = state,
+                since = if (it.state == state) it.since else SystemClock.uptimeMillis(),
+                transcript = transcript,
+                status = status,
+                reply = reply,
+                pending = pending,
+                micOpen = micOpen
+            )
+        }
+    }
+}

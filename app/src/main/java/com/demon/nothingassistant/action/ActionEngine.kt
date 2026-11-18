@@ -1,0 +1,883 @@
+package com.demon.nothingassistant.action
+
+import android.app.SearchManager
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
+import android.net.Uri
+import android.os.BatteryManager
+import android.os.Handler
+import android.os.Looper
+import android.provider.AlarmClock
+import android.provider.ContactsContract
+import android.provider.MediaStore
+import android.provider.Settings
+import android.view.KeyEvent
+import androidx.core.content.ContextCompat
+import com.demon.nothingassistant.access.NothingAccess
+import com.demon.nothingassistant.intent.AppOp
+import com.demon.nothingassistant.intent.Command
+import com.demon.nothingassistant.intent.MediaKey
+import com.demon.nothingassistant.intent.SettingsPage
+import com.demon.nothingassistant.intent.VolumeAction
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+
+sealed interface ActionResult {
+    /** [launch], when set, still has to run: the caller starts it as the spoken reply begins, so voice and action line up. */
+    data class Success(val message: String, val launch: (() -> Unit)? = null) : ActionResult
+    data class Failure(val message: String) : ActionResult
+
+    /** Needs a yes / no from the user before running [command]. */
+    data class Confirm(
+        val title: String,
+        val detail: String,
+        val spoken: String,
+        val command: Command,
+        val declineMessage: String,
+        val declineAsFailure: Boolean = true
+    ) : ActionResult
+}
+
+data class Contact(val name: String, val number: String)
+
+sealed interface ContactLookup {
+    data class Found(val contact: Contact) : ContactLookup
+    data object NoPermission : ContactLookup
+    data object NotFound : ContactLookup
+
+    /** No exact match, but this contact is spelled similarly. Ask before using it. */
+    data class Fuzzy(val contact: Contact) : ContactLookup
+}
+
+/** Runs commands through ordinary Android APIs and intents. No root, no special access. */
+class ActionEngine(context: Context) {
+
+    private val app = context.applicationContext
+    private val cameraManager = app.getSystemService(CameraManager::class.java)
+    private val audio = app.getSystemService(AudioManager::class.java)
+
+    val system = SystemActions(app)
+    private val ui = UiControl(app)
+    private val smart = SmartUi(ui, app)
+    private val notify = NotifyActions(app)
+    /** Set by the controller so open-ended jobs can ask the user's AI provider. */
+    var brainProvider: () -> com.demon.nothingassistant.ai.Brain? = { null }
+    private val agent by lazy { com.demon.nothingassistant.agent.ScreenAgent(app, { c -> runSuspendInner(c) }, { brainProvider() }) }
+    private val priv = com.demon.nothingassistant.priv.PrivActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { it.pkg to it.label } }, { i -> launch(i) })
+    private val share = ShareActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { it.pkg to it.label } }, { i -> launch(i) }, ui, smart)
+    /** Called by the controller so long jobs can say "It's updating." out loud. */
+    var announce: (String) -> Unit = {}
+    private val play = PlayStore(app, ui, { n -> findApp(n)?.takeIf { it.exact }?.let { it.pkg to it.label } }, { priv.ensureAccessibility() }, { m -> onProgress?.invoke(m) }, { m -> announce(m) })
+    private val nav = NavActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.pkg }, { i -> launch(i) })
+
+    /** Package names of the default music / video apps chosen in Settings (empty = none). */
+    var musicApp: () -> String = { "" }
+    var videoApp: () -> String = { "" }
+    private var lastScreen: Command? = null
+
+    private var torchOn = false
+
+    private val torchId: String? by lazy {
+        runCatching {
+            cameraManager.cameraIdList.firstOrNull { id ->
+                val c = cameraManager.getCameraCharacteristics(id)
+                c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
+                    c.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            }
+        }.getOrNull()
+    }
+
+    init {
+        Thread { runCatching { appIndex() } }.start() // warm the app list so the first "open X" is instant
+        // Keeps torchOn in sync when the user toggles the torch elsewhere (quick settings, etc).
+        runCatching {
+            cameraManager.registerTorchCallback(object : CameraManager.TorchCallback() {
+                override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+                    if (cameraId == torchId) torchOn = enabled
+                }
+            }, Handler(Looper.getMainLooper()))
+        }
+    }
+
+    /** Commands that wait on other apps' screens run here, off the main thread. Everything else is instant. */
+    suspend fun runSuspend(cmd: Command): ActionResult {
+        val r = runSuspendInner(cmd)
+        if (r is ActionResult.Success && cmd is Command.Screen && cmd !is Command.UiRepeat && cmd !is Command.GlobalAction &&
+            cmd !is Command.UiFind && cmd !== Command.ReadScreen && cmd !is Command.Chain && cmd !is Command.Wait
+        ) lastScreen = cmd
+        return r
+    }
+
+    private suspend fun runSuspendInner(cmd: Command): ActionResult = when (cmd) {
+        Command.UiRepeat -> lastScreen?.let { runSuspendInner(it) } ?: ActionResult.Failure("I don't have anything to repeat yet.")
+        is Command.UiX -> smart.run(cmd)
+        is Command.Weather -> Weather.now(cmd.place, cmd.tomorrow)
+        is Command.Nav -> nav.run(cmd)
+        is Command.Priv -> priv.run(cmd)
+        is Command.Task -> agent.run(cmd.goal)
+        is Command.News -> ActionResult.Success(WebInfo.news(cmd.topic))
+        is Command.Say -> ActionResult.Success(cmd.text)
+        is Command.KeepAwake -> keepAwake(cmd.minutes)
+        is Command.AddMacro -> addMacro(cmd.macro)
+        is Command.MacroManage -> manageMacros(cmd)
+        is Command.AskMessage -> { com.demon.nothingassistant.intent.DictState.ask(cmd.contact, cmd.app); ActionResult.Success("What should I say to ${cmd.contact}?") }
+        is Command.AppSearch -> appSearch(cmd)
+        is Command.SmartSearch -> smartSearch(cmd)
+        is Command.PlayIn -> playIn(cmd)
+        is Command.InstallApp -> play.run(cmd.name, PlayStore.Mode.INSTALL)
+        is Command.UpdateApp -> play.run(cmd.name, PlayStore.Mode.UPDATE, cmd.approved)
+        is Command.Notif -> notify.run(cmd)
+        is Command.Toggle -> (cmd.on?.let { priv.quickToggle(cmd.key, it) }) ?: ui.toggle(cmd.key, cmd.on)
+        is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
+        is Command.GlobalAction -> ui.global(cmd.key)
+        is Command.UiTap -> smart.tap(cmd.label, cmd.kind)
+        is Command.UiSwipe -> ui.swipe(cmd.dir)
+        is Command.UiZoom -> ui.zoom(cmd.zoomIn)
+        is Command.UiClip -> ui.clip(cmd.op)
+        is Command.UiScrollEdge -> ui.scrollEdge(cmd.top)
+        Command.UiEnter -> ui.enter()
+        is Command.UiSearch -> ui.search(cmd.query, cmd.pick, cmd.first)
+        is Command.UiSend -> ui.send(cmd.body)
+        is Command.UiMessage -> ui.message(cmd.contact, cmd.body)
+        is Command.TakePhoto -> ui.takePhoto(cmd.selfie)
+        is Command.Chain -> runChain(cmd)
+        is Command.Wait -> { onProgress?.invoke(cmd.describe()); delay(cmd.seconds * 1000L); ActionResult.Success("") }
+        is Command.SharePhoto -> share.run(cmd)
+        is Command.Call -> placeCall(cmd.target)
+        is Command.UiType -> ui.type(cmd.text)
+        is Command.UiScroll -> ui.scroll(cmd.forward)
+        is Command.UiFind -> smart.find(cmd.label)
+        Command.ReadScreen -> ui.readScreen()
+        Command.LockScreen -> ui.lockScreen() ?: system.lock()
+        is Command.AppAction ->
+            if (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE) appTask(cmd) else run(cmd)
+        else -> run(cmd)
+    }
+
+    /** Shown in the status line while a chain works through its steps. */
+    var onProgress: ((String) -> Unit)? = null
+
+    /** Runs the steps one after another. If one gets stuck, says exactly where and asks what to do next. */
+    private suspend fun runChain(c: Command.Chain): ActionResult {
+        var last = "Done."
+        for ((i, step) in c.steps.withIndex()) {
+            onProgress?.invoke(step.describe())
+            var r = runSuspend(step)
+            if (r is ActionResult.Confirm) {
+                // Screen taps are never guessed inside a chain: stop and ask, so the wrong chat or button is never pressed.
+                val gc = r.command
+                if (gc is Command.UiSmart && gc.approved) {
+                    // A risky tap (Pay, Delete...): ask, and if the answer is yes, do it and carry on with the rest of the steps.
+                    return ActionResult.Confirm(r.title, r.detail, r.spoken, Command.Chain(listOf<Command>(gc) + c.steps.drop(i + 1)), r.declineMessage, r.declineAsFailure)
+                }
+                if (r.command is Command.UiX) return ActionResult.Failure("I got through $i of ${c.steps.size} steps. ${r.spoken} Say it again with the exact name, or tell me what to tap.")
+                r = runSuspend(r.command) // otherwise take the closest match
+            }
+            when (r) {
+                is ActionResult.Success -> {
+                    if (step !is Command.Wait && r.message.isNotBlank()) last = r.message
+                    r.launch?.let { go ->
+                        val before = ui.frontPackage()
+                        go()
+                        ui.settleAfterLaunch(before)
+                    }
+                }
+                is ActionResult.Failure -> {
+                    val done = if (i == 0) "I couldn't do the first step." else "I got through $i of ${c.steps.size} steps."
+                    return ActionResult.Failure("$done I'm stuck at: ${step.describe().trimEnd('…')}. ${r.message} Tell me what to tap, or what to do next.")
+                }
+                else -> Unit
+            }
+        }
+        return ActionResult.Success(last)
+    }
+
+    /** True for commands that take a moment because they drive another screen. */
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Priv || cmd is Command.Task || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.UpdateApp || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+        cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
+        (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
+
+    private suspend fun appTask(c: Command.AppAction): ActionResult {
+        val hit: AppHit = if (c.pkg != null) {
+            AppHit(c.pkg, runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(c.pkg, 0)).toString() }.getOrDefault(c.name), true)
+        } else {
+            (findApp(c.name) ?: findApp(c.name, fuzzy = true)) ?: return ActionResult.Failure("I couldn't find an app called ${c.name}.")
+        }
+        if (!hit.exact) {
+            return ActionResult.Confirm(
+                title = (if (c.op == AppOp.FORCE_STOP) "Force stop " else "Clear cache of ") + hit.label + "?",
+                detail = "I couldn't find “${c.name}”. Closest match is ${hit.label}.",
+                spoken = "Do you mean ${hit.label}?",
+                command = c.copy(pkg = hit.pkg),
+                declineMessage = "Okay. I won't touch it."
+            )
+        }
+        return priv.quickAppTask(c.op.name, hit.pkg, hit.label) ?: ui.appTask(c.op, hit.pkg, hit.label)
+    }
+
+    fun run(cmd: Command): ActionResult = when (cmd) {
+        is Command.Flashlight -> flashlight(cmd.on)
+        is Command.OpenApp -> openApp(cmd.name)
+        is Command.Find -> findThing(cmd.query)
+        is Command.LaunchPackage -> launchPackage(cmd.pkg, cmd.label)
+        is Command.SetTimer -> setTimer(cmd.seconds)
+        is Command.SetAlarm -> setAlarm(cmd.hour, cmd.minute)
+        is Command.Call -> ActionResult.Failure("Calling needs the full engine.")
+        is Command.ComposeSms -> composeSms(cmd)
+        is Command.SendSms -> ActionResult.Failure("That message needs your confirmation first.")
+        is Command.Volume -> if (cmd.stream == com.demon.nothingassistant.intent.VolStream.MEDIA) volume(cmd) else system.streamVolume(cmd)
+        is Command.OpenSetting -> openNamedSetting(cmd.name)
+        is Command.Brightness -> system.brightness(cmd)
+        is Command.Rotation -> system.rotation(cmd.auto)
+        is Command.ScreenTimeout -> system.screenTimeout(cmd.seconds)
+        is Command.Dnd -> system.dnd(cmd.on)
+        is Command.Ringer -> system.ringer(cmd.mode)
+        Command.LockScreen -> system.lock()
+        is Command.Notifications -> system.notifications(cmd.clear)
+        Command.Agenda -> system.agenda()
+        is Command.AddEvent -> system.addEvent(cmd.title)
+        is Command.Email -> system.email(cmd.to, cmd.body)
+        is Command.OpenUrl -> system.openUrl(cmd.url)
+        Command.Wallpaper -> system.wallpaper()
+        is Command.Status -> system.status(cmd.kind)
+        is Command.AppAction -> appAction(cmd)
+        is Command.CopyText -> system.copy(cmd.text)
+        Command.ReadClipboard -> system.readClipboard()
+        Command.ShowAlarms -> system.showAlarms()
+        is Command.Media -> media(cmd.key)
+        is Command.Search -> search(cmd.query)
+        is Command.Navigate -> navigate(cmd.place)
+        is Command.OpenSettings -> openSettings(cmd.page)
+        Command.Battery -> battery()
+        Command.TimeNow -> ActionResult.Success("It's " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()))
+        Command.DateToday -> ActionResult.Success(
+            "Today is " + SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(Date())
+        )
+        Command.Camera -> if (launch(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))) {
+            ActionResult.Success(pick("Opening the camera.", "Camera's up.", "Here's the camera."))
+        } else {
+            ActionResult.Failure("No camera app found")
+        }
+        is Command.PlayMusic -> playMusic(cmd)
+        is Command.Reminder -> reminder(cmd)
+        is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
+        is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
+        is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
+        is Command.TakePhoto, is Command.Chain, is Command.Wait, is Command.SharePhoto, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp, is Command.UpdateApp ->
+            ActionResult.Failure("That needs the screen-control service.")
+        is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
+    }
+
+
+    // ---- Search and play inside apps ----
+
+    private fun launcherPkg(): String =
+        app.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName.orEmpty()
+
+    /** "Search X on Instagram": open it, find its search box, search. The web is only used if there is no such app. */
+    private suspend fun appSearch(c: Command.AppSearch): ActionResult {
+        val hit = findApp(c.app) ?: findApp(c.app, fuzzy = true)
+            ?: return run(Command.Search("${c.query} ${c.app}"))
+        return runChain(Command.Chain(listOf(Command.LaunchPackage(hit.pkg, hit.label), Command.UiSearch(c.query, false))))
+    }
+
+    /** "Search X": the search box of the app in front. With none, a settings page or the web. */
+    private suspend fun smartSearch(c: Command.SmartSearch): ActionResult {
+        val svc = com.demon.nothingassistant.access.NothingAccess.instance
+        if (svc != null) {
+            val pkg = svc.frontPackage()
+            if (pkg.isNotBlank() && pkg != launcherPkg() && pkg != "com.android.systemui") {
+                val r = ui.search(c.query, false)
+                if (r is ActionResult.Success) return r
+            }
+        }
+        SettingsTable.resolve(c.query)?.let { if (it.score >= 0.95) return system.openSetting(it.entry) }
+        return run(Command.Search(c.query))
+    }
+
+    /** Play in a named app (it is a music or video app because you named it), else the default from Settings, else YouTube / the music search. */
+    private suspend fun playIn(c: Command.PlayIn): ActionResult {
+        var pkg: String? = null
+        var label = ""
+        c.app?.let { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { pkg = it.pkg; label = it.label } }
+        if (pkg == null && c.app == null) {
+            val def = (if (c.video) videoApp() else musicApp()).trim()
+            if (def.isNotEmpty() && runCatching { app.packageManager.getLaunchIntentForPackage(def) }.getOrNull() != null) {
+                pkg = def
+                label = runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(def, 0)).toString() }.getOrDefault(def)
+            }
+        }
+        if (pkg == null && (c.video || c.app?.contains("tube", true) == true)) findApp("youtube")?.let { pkg = it.pkg; label = it.label }
+        val p = pkg
+        if (p == null) {
+            val q = c.query
+            return when {
+                q != null && c.video -> ActionResult.Success("Searching YouTube for $q.") { launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q)))) }
+                q != null -> playMusic(Command.PlayMusic(q, c.app))
+                c.app != null -> ActionResult.Failure("I couldn't find an app called ${c.app}.")
+                else -> run(Command.Media(MediaKey.PLAY))
+            }
+        }
+        if (com.demon.nothingassistant.access.NothingAccess.instance == null) {
+            // No screen control: ask the music app directly.
+            val q = c.query
+            return if (q != null) playMusic(Command.PlayMusic(q, label)) else launchPackage(p, label)
+        }
+        val steps = ArrayList<Command>()
+        steps.add(Command.LaunchPackage(p, label))
+        if (c.query != null) steps.add(Command.UiSearch(c.query, pick = true, first = true)) else steps.add(Command.UiPlayRandom(c.video))
+        return runChain(Command.Chain(steps))
+    }
+
+    // ---- Settings pages and app actions, with "did you mean" confirmation ----
+
+    private fun openNamedSetting(name: String): ActionResult {
+        SettingsTable.exact(name)?.let { return system.openSetting(it) }
+        val m = SettingsTable.resolve(name) ?: return ActionResult.Failure("I don't know a settings page called $name.")
+        if (m.score >= 0.84) return system.openSetting(m.entry)
+        val close = m.entry
+        return ActionResult.Confirm(
+            title = "Open ${close.label}?",
+            detail = "I couldn't find “$name”. Closest match is ${close.label}.",
+            spoken = "Do you mean ${close.label} settings?",
+            command = Command.OpenSetting(close.key),
+            declineMessage = "Okay. I won't open anything."
+        )
+    }
+
+    private data class AppHit(val pkg: String, val label: String, val exact: Boolean, val cls: String = "")
+
+    private class AppEntry(val label: String, val norm: String, val words: List<String>, val pkg: String, val cls: String)
+
+    @Volatile private var index: List<AppEntry> = emptyList()
+    @Volatile private var indexAt = 0L
+
+    /** Launchable apps, read once and kept for two minutes so "open X" does not re-scan the phone every time. */
+    private fun appIndex(): List<AppEntry> {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (index.isEmpty() || now - indexAt > 120_000) rebuildIndex()
+        return index
+    }
+
+    private fun rebuildIndex() {
+        val pm = app.packageManager
+        index = runCatching {
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0).map { ri ->
+                val label = ri.loadLabel(pm).toString()
+                AppEntry(
+                    label, norm(label),
+                    label.split(Regex("[^A-Za-z0-9]+")).map { norm(it) }.filter { it.length >= 4 },
+                    ri.activityInfo.packageName, ri.activityInfo.name
+                )
+            }
+        }.getOrDefault(index)
+        indexAt = android.os.SystemClock.uptimeMillis()
+    }
+
+    /** Refreshes the list if it is more than 8 seconds old. Returns true if it did. */
+    private fun refreshIndexIfStale(): Boolean {
+        if (android.os.SystemClock.uptimeMillis() - indexAt < 8_000) return false
+        rebuildIndex()
+        return true
+    }
+
+    /** Best installed app for [name]. With [fuzzy] false only clear (exact, prefix, contains) matches count; true only close spellings. */
+    private fun findApp(name: String, fuzzy: Boolean = false): AppHit? {
+        val q = alias(norm(name))
+        if (q.isEmpty()) return null
+        val apps = appIndex()
+        if (!fuzzy) {
+            var best: AppEntry? = null
+            var bestScore = 0
+            for (e in apps) {
+                val score = when {
+                    e.norm == q -> 100
+                    e.norm.startsWith(q) -> 80
+                    e.norm.length >= 3 && q.startsWith(e.norm) -> 70
+                    e.norm.contains(q) -> 60
+                    else -> 0
+                }
+                if (score > bestScore) { best = e; bestScore = score }
+            }
+            return best?.let { AppHit(it.pkg, it.label, true, it.cls) }
+        }
+        if (q.length < 4) return null
+        var close: AppEntry? = null
+        var closeScore = 0.0
+        for (e in apps) {
+            val sim = (listOf(e.norm) + e.words).maxOf { Fuzzy.similarity(q, it) }
+            if (sim > closeScore) { close = e; closeScore = sim }
+        }
+        return if (close != null && closeScore >= 0.68) AppHit(close.pkg, close.label, false, close.cls) else null
+    }
+
+    private fun appAction(c: Command.AppAction): ActionResult {
+        val hit: AppHit = if (c.pkg != null) {
+            AppHit(c.pkg, runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(c.pkg, 0)).toString() }.getOrDefault(c.name), true)
+        } else {
+            (findApp(c.name) ?: findApp(c.name, fuzzy = true)) ?: return ActionResult.Failure("I couldn't find an app called ${c.name}.")
+        }
+        if (!hit.exact) {
+            return ActionResult.Confirm(
+                title = (if (c.op == AppOp.UNINSTALL) "Uninstall " else "Show info for ") + hit.label + "?",
+                detail = "I couldn't find “${c.name}”. Closest match is ${hit.label}.",
+                spoken = "Do you mean ${hit.label}?",
+                command = c.copy(pkg = hit.pkg),
+                declineMessage = "Okay. I won't touch it."
+            )
+        }
+        return when (c.op) {
+            AppOp.INFO -> ActionResult.Success("Here's the info for ${hit.label}.") {
+                launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${hit.pkg}")))
+            }
+            AppOp.UNINSTALL -> ActionResult.Success("Opening the uninstall prompt for ${hit.label}. Confirm it there.") {
+                launch(Intent(Intent.ACTION_DELETE, Uri.parse("package:${hit.pkg}")))
+            }
+            else -> ActionResult.Failure("Not something I can do here.")
+        }
+    }
+
+    // ---- Contacts (used by calls and by the message confirmation card) ----
+
+    fun findContact(query: String): ContactLookup {
+        val looksLikeNumber = query.any { it.isDigit() } && query.all { it.isDigit() || it in " +-()" }
+        if (looksLikeNumber) {
+            val digits = query.filter { it.isDigit() || it == '+' }
+            return ContactLookup.Found(Contact(digits, digits))
+        }
+        if (ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CONTACTS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return ContactLookup.NoPermission
+        }
+        val q = query.trim()
+        var best: Contact? = null
+        runCatching {
+            app.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
+                arrayOf("%$q%"),
+                null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(0) ?: continue
+                    val number = c.getString(1) ?: continue
+                    val candidate = Contact(name, number)
+                    val current = best
+                    best = when {
+                        current == null -> candidate
+                        name.equals(q, ignoreCase = true) && !current.name.equals(q, ignoreCase = true) -> candidate
+                        !current.name.equals(q, ignoreCase = true) && name.length < current.name.length -> candidate
+                        else -> current
+                    }
+                }
+            }
+        }
+        best?.let { return ContactLookup.Found(it) }
+        return fuzzyContact(q)
+    }
+
+    /** Looks at every contact and returns the one whose name is spelled most like [q], if it is close enough. */
+    private fun fuzzyContact(q: String): ContactLookup {
+        val nq = norm(q)
+        if (nq.length < 3) return ContactLookup.NotFound
+        var best: Contact? = null
+        var score = 0.0
+        runCatching {
+            app.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(0) ?: continue
+                    val number = c.getString(1) ?: continue
+                    val parts = listOf(norm(name)) + name.split(Regex("\\s+")).map { norm(it) }.filter { it.length >= 3 }
+                    val sim = parts.maxOf { similarity(nq, it) }
+                    if (sim > score) { score = sim; best = Contact(name, number) }
+                }
+            }
+        }
+        val b = best
+        return if (b != null && score >= 0.7) ContactLookup.Fuzzy(b) else ContactLookup.NotFound
+    }
+
+    // ---- Individual actions ----
+
+    private fun flashlight(on: Boolean?): ActionResult {
+        val id = torchId ?: return ActionResult.Failure("No flashlight found on this phone")
+        val target = on ?: !torchOn
+        return try {
+            cameraManager.setTorchMode(id, target)
+            torchOn = target
+            ActionResult.Success(
+                if (target) pick("Flashlight on.", "Torch is on.", "Light's on.")
+                else pick("Flashlight off.", "Torch is off.", "Light's off.")
+            )
+        } catch (e: Exception) {
+            ActionResult.Failure("Couldn't reach the flashlight. Is the camera in use?")
+        }
+    }
+
+    private fun openApp(name: String): ActionResult {
+        val cleaned = com.demon.nothingassistant.intent.Canon.phrase(name).removePrefix("the ").removeSuffix(" app").trim()
+        val q = alias(norm(cleaned))
+        if (q.isEmpty()) return ActionResult.Failure("Which app should I open?")
+
+        // 1) A clear app match opens straight away.
+        var hit = findApp(cleaned, fuzzy = false)
+        val page = SettingsTable.resolve(cleaned)
+        if (hit == null) {
+            // 2) A Settings page, even when speech spelled it differently ("wi-fi", "developer option").
+            if (page != null && page.score >= 0.84) return system.openSetting(page.entry)
+            // 3) The app may have been installed a moment ago: refresh the list once.
+            if (refreshIndexIfStale()) hit = findApp(cleaned, fuzzy = false)
+        }
+        if (hit != null) return launchHit(hit)
+
+        // 4) A similar-sounding app. Ask before opening it.
+        findApp(cleaned, fuzzy = true)?.let { close ->
+            // Opening an app is harmless: when the match is clearly the closest, just open it.
+            val sim = Fuzzy.similarity(NothingAccess.norm(cleaned).replace(" ", ""), NothingAccess.norm(close.label).replace(" ", ""))
+            if (sim >= 0.7) return launchHit(close)
+            return ActionResult.Confirm(
+                title = "Open ${close.label}?",
+                detail = "I couldn't find “$name”. Closest match is ${close.label}.",
+                spoken = "Do you mean ${close.label}?",
+                command = Command.LaunchPackage(close.pkg, close.label),
+                declineMessage = "Okay."
+            )
+        }
+        // 5) Or a similar Settings page.
+        if (page != null) {
+            return ActionResult.Confirm(
+                title = "Open ${page.entry.label}?",
+                detail = "I couldn't find “$name”. Closest match is ${page.entry.label} settings.",
+                spoken = "Do you mean ${page.entry.label} settings?",
+                command = Command.OpenSetting(page.entry.key),
+                declineMessage = "Okay. I won't open anything."
+            )
+        }
+        return ActionResult.Failure("I couldn't find $name on this phone.")
+    }
+
+    /** "Find X": the app or setting if there is one, otherwise offer a web search. */
+    private fun findThing(query: String): ActionResult {
+        val r = openApp(query)
+        if (r !is ActionResult.Failure) return r
+        return ActionResult.Confirm(
+            title = "Search the web?",
+            detail = "I couldn't find “$query” on this phone.",
+            spoken = "I couldn't find $query on this phone. Want me to search the web for it?",
+            command = Command.Search(query),
+            declineMessage = "Okay."
+        )
+    }
+
+    private fun launchHit(hit: AppHit): ActionResult {
+        val intent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setClassName(hit.pkg, hit.cls)
+        return ActionResult.Success("Opening ${hit.label}.") { launch(intent) }
+    }
+
+    private fun launchPackage(pkg: String, label: String): ActionResult {
+        val intent = app.packageManager.getLaunchIntentForPackage(pkg)
+            ?: return ActionResult.Failure("Couldn't open $label")
+        return ActionResult.Success("Opening $label.") { launch(intent) }
+    }
+
+    /** 1.0 = identical, 0.0 = nothing in common (edit distance relative to the longer word). */
+    private fun similarity(a: String, b: String): Double {
+        if (a.isEmpty() || b.isEmpty()) return 0.0
+        val prev = IntArray(b.length + 1) { it }
+        val cur = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            cur[0] = i
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                cur[j] = minOf(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
+            }
+            cur.copyInto(prev)
+        }
+        return 1.0 - prev[b.length].toDouble() / maxOf(a.length, b.length)
+    }
+
+    /** Names of launchable apps, used to render "Opening <app>." ahead of time for the offline voice. */
+    fun appLabels(): List<String> = appIndex().map { it.label }.filter { it.length in 2..20 }.distinct()
+
+    /** Several ways to say the same thing, so replies sound like a person rather than an echo of the command. */
+    private fun pick(vararg options: String): String = options.random()
+
+    private fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+
+    private fun alias(q: String) = when (q) {
+        "yt" -> "youtube"
+        "insta" -> "instagram"
+        "fb" -> "facebook"
+        "wa" -> "whatsapp"
+        "gmaps", "googlemaps" -> "maps"
+        else -> q
+    }
+
+    private fun setTimer(seconds: Int): ActionResult {
+        val intent = Intent(AlarmClock.ACTION_SET_TIMER)
+            .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
+            .putExtra(AlarmClock.EXTRA_MESSAGE, "Nothing Assistant")
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        return if (launch(intent)) {
+            ActionResult.Success(
+                pick(
+                    "Timer set for ${formatDuration(seconds)}.",
+                    "Alright, ${formatDuration(seconds)}, starting now.",
+                    "Okay, I'll keep time. ${formatDuration(seconds)}."
+                )
+            )
+        } else {
+            ActionResult.Failure("No clock app can set timers")
+        }
+    }
+
+    private fun setAlarm(hour: Int, minute: Int): ActionResult {
+        val intent = Intent(AlarmClock.ACTION_SET_ALARM)
+            .putExtra(AlarmClock.EXTRA_HOUR, hour)
+            .putExtra(AlarmClock.EXTRA_MINUTES, minute)
+            .putExtra(AlarmClock.EXTRA_MESSAGE, "Nothing Assistant")
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        val cal = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, minute) }
+        val label = SimpleDateFormat("h:mm a", Locale.getDefault()).format(cal.time)
+        return if (launch(intent)) ActionResult.Success(pick("Alarm set for $label.", "Done. I'll wake you at $label.", "Okay, $label it is.")) else ActionResult.Failure("No clock app can set alarms")
+    }
+
+    private fun hasCallPermission() = ContextCompat.checkSelfPermission(app, android.Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+
+    /** Really places the call: directly with Phone permission, else through Shizuku/root, else dials and taps Call on the screen. */
+    private suspend fun placeCall(target: String): ActionResult {
+        val clean = target.trim()
+        val digits = clean.replace(Regex("[\\s-]"), "")
+        val number: String
+        val name: String
+        if (digits.matches(Regex("^\\+?\\d{3,15}$"))) { number = digits; name = digits } else {
+            when (val r = findContact(clean)) {
+                is ContactLookup.Found -> { number = r.contact.number; name = r.contact.name }
+                is ContactLookup.Fuzzy -> return ActionResult.Confirm(
+                    title = "Call ${r.contact.name}?",
+                    detail = "I couldn't find “$target”. Closest match is ${r.contact.name}.",
+                    spoken = "Do you mean ${r.contact.name}?",
+                    command = Command.Call(r.contact.name),
+                    declineMessage = "Okay. I won't call anyone."
+                )
+                ContactLookup.NoPermission -> return ActionResult.Failure("Allow Contacts access to call by name")
+                ContactLookup.NotFound -> return ActionResult.Failure("I couldn't find “$target” in your contacts")
+            }
+        }
+        val uri = Uri.fromParts("tel", number, null)
+        if (hasCallPermission()) {
+            return if (launch(Intent(Intent.ACTION_CALL, uri))) ActionResult.Success(pick("Calling $name.", "Dialing $name.")) else ActionResult.Failure("No phone app found")
+        }
+        if (priv.shell("am start -a android.intent.action.CALL -d tel:" + Uri.encode(number))) return ActionResult.Success("Calling $name.")
+        // No permission: open the dialer, then press the green button for you.
+        val before = ui.frontPackage()
+        if (!launch(Intent(Intent.ACTION_DIAL, uri))) return ActionResult.Failure("No dialer found")
+        val svc = com.demon.nothingassistant.access.NothingAccess.instance
+            ?: return ActionResult.Success("The number for $name is in the dialer. Allow Phone access in Settings and I'll call directly.")
+        ui.settleAfterLaunch(before)
+        val btn = svc.waitFind(listOf("Call", "Dial", "Voice call", "Make call", "Call $name"), 2500)
+        return if (btn != null && svc.click(btn)) ActionResult.Success("Calling $name.")
+        else ActionResult.Failure("Allow Phone access so I can place calls myself. For now, the number for $name is ready in the dialer.")
+    }
+
+    private fun composeSms(c: Command.ComposeSms): ActionResult {
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(c.number)))
+            .putExtra("sms_body", c.body)
+        return if (launch(intent)) {
+            ActionResult.Success(pick("All set. Tap send when you're ready.", "Your message to ${c.displayName} is ready. Just hit send.", "Drafted. Tap send in Messages."))
+        } else {
+            ActionResult.Failure("No messaging app found")
+        }
+    }
+
+    private fun volume(cmd: Command.Volume): ActionResult {
+        val stream = AudioManager.STREAM_MUSIC
+        val max = audio.getStreamMaxVolume(stream).coerceAtLeast(1)
+        when (cmd.action) {
+            VolumeAction.UP -> audio.adjustStreamVolume(stream, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+            VolumeAction.DOWN -> audio.adjustStreamVolume(stream, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+            VolumeAction.MUTE -> audio.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+            VolumeAction.SET -> audio.setStreamVolume(
+                stream, (max * cmd.percent / 100.0).roundToInt(), AudioManager.FLAG_SHOW_UI
+            )
+        }
+        if (cmd.action == VolumeAction.MUTE) return ActionResult.Success(pick("Muted.", "Quiet now."))
+        val pct = (audio.getStreamVolume(stream) * 100f / max).roundToInt()
+        return ActionResult.Success(pick("Volume's at $pct%.", "Okay, $pct%."))
+    }
+
+    private fun media(key: MediaKey): ActionResult {
+        val code = when (key) {
+            MediaKey.PLAY -> KeyEvent.KEYCODE_MEDIA_PLAY
+            MediaKey.PAUSE -> KeyEvent.KEYCODE_MEDIA_PAUSE
+            MediaKey.NEXT -> KeyEvent.KEYCODE_MEDIA_NEXT
+            MediaKey.PREVIOUS -> KeyEvent.KEYCODE_MEDIA_PREVIOUS
+        }
+        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, code))
+        audio.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, code))
+        val label = when (key) {
+            MediaKey.PLAY -> "Play"
+            MediaKey.PAUSE -> "Pause"
+            MediaKey.NEXT -> "Next track"
+            MediaKey.PREVIOUS -> "Previous track"
+        }
+        return ActionResult.Success(
+            when (key) {
+                MediaKey.PLAY -> pick("Playing.", "Resuming.")
+                MediaKey.PAUSE -> pick("Paused.", "Okay, paused.")
+                MediaKey.NEXT -> pick("Skipping.", "Next one.")
+                MediaKey.PREVIOUS -> pick("Going back.", "Previous track.")
+            }
+        )
+    }
+
+    private fun battery(): ActionResult {
+        val bm = app.getSystemService(BatteryManager::class.java)
+        val pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        val state = if (bm.isCharging) ", charging" else ""
+        return ActionResult.Success("Battery's at $pct%$state.")
+    }
+
+    private fun search(query: String): ActionResult {
+        val intent = Intent(Intent.ACTION_WEB_SEARCH).putExtra(SearchManager.QUERY, query)
+        if (launch(intent)) return ActionResult.Success(pick("Here's what I found for “$query”.", "Looking up “$query”."))
+        val fallback = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(query)))
+        return if (launch(fallback)) ActionResult.Success(pick("Here's what I found for “$query”.", "Looking up “$query”.")) else ActionResult.Failure("No browser found")
+    }
+
+    private fun keepAwake(minutes: Int): ActionResult {
+        if (minutes <= 0) {
+            return if (com.demon.nothingassistant.auto.AwakeService.active) {
+                com.demon.nothingassistant.auto.AwakeService.stop(app)
+                ActionResult.Success("Okay, the screen can sleep normally again.")
+            } else ActionResult.Success("The screen wasn't being kept awake.")
+        }
+        com.demon.nothingassistant.auto.AwakeService.start(app, minutes)
+        val text = when {
+            minutes % 60 == 0 -> "${minutes / 60} ${if (minutes == 60) "hour" else "hours"}"
+            minutes > 60 -> "${minutes / 60} hours ${minutes % 60} minutes"
+            else -> "$minutes minutes"
+        }
+        return ActionResult.Success("Okay, I'll keep the screen awake for $text. Say stop keeping the screen awake to end it.")
+    }
+
+    private fun addMacro(m: com.demon.nothingassistant.auto.Macro): ActionResult {
+        com.demon.nothingassistant.auto.MacroStore.add(app, m)
+        com.demon.nothingassistant.auto.MacroScheduler.schedule(app, m)
+        val what = m.text.removePrefix("say ").let { if (m.text.startsWith("say ")) "say \"$it\"" else m.text }
+        return ActionResult.Success("Done. I'll $what ${m.whenText()}.")
+    }
+
+    private fun manageMacros(c: Command.MacroManage): ActionResult {
+        val all = com.demon.nothingassistant.auto.MacroStore.all(app)
+        fun drop(m: com.demon.nothingassistant.auto.Macro) {
+            com.demon.nothingassistant.auto.MacroScheduler.cancel(app, m.id)
+            com.demon.nothingassistant.auto.MacroStore.remove(app, m.id)
+        }
+        return when (c.op) {
+            "LIST" -> if (all.isEmpty()) ActionResult.Success("You have no scheduled tasks. Try saying: open YouTube every day at 10 AM.")
+            else ActionResult.Success("You have ${all.size} scheduled ${if (all.size == 1) "task" else "tasks"}. " +
+                all.take(6).joinToString(" ") { "${it.text}, ${it.whenText()}${if (it.enabled) "." else " (paused)."}" })
+            "CLEAR_ALL" -> { all.forEach(::drop); ActionResult.Success(if (all.isEmpty()) "There was nothing scheduled." else "Cleared all ${all.size} scheduled tasks.") }
+            "DELETE_LAST" -> all.lastOrNull()?.let { drop(it); ActionResult.Success("Removed: ${it.text}, ${it.whenText()}.") } ?: ActionResult.Failure("There's nothing scheduled.")
+            "DELETE" -> {
+                val words = c.arg.lowercase().split(" ").filter { it.length > 2 }
+                val hit = all.filter { m -> words.isNotEmpty() && words.all { m.text.lowercase().contains(it) } }
+                if (hit.isEmpty()) ActionResult.Failure("I couldn't find a scheduled task about ${c.arg}.")
+                else { hit.forEach(::drop); ActionResult.Success("Removed ${hit.size} scheduled ${if (hit.size == 1) "task" else "tasks"} about ${c.arg}.") }
+            }
+            "PAUSE", "RESUME" -> {
+                val on = c.op == "RESUME"
+                all.forEach { m -> val n = m.copy(enabled = on); com.demon.nothingassistant.auto.MacroStore.update(app, n); com.demon.nothingassistant.auto.MacroScheduler.schedule(app, n) }
+                ActionResult.Success(if (all.isEmpty()) "There's nothing scheduled." else if (on) "Scheduled tasks are back on." else "Paused all scheduled tasks.")
+            }
+            else -> ActionResult.Failure("I didn't get that.")
+        }
+    }
+
+    private fun navigate(place: String): ActionResult {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(place)))
+        return if (launch(intent)) ActionResult.Success(pick("Pulling up $place on the map.", "Here's $place.")) else ActionResult.Failure("No maps app found")
+    }
+
+    private fun openSettings(page: SettingsPage): ActionResult {
+        val (intent, message) = when (page) {
+            SettingsPage.INTERNET -> Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY) to
+                "Here are the Wi-Fi controls. Android won't let apps flip it directly."
+            SettingsPage.BLUETOOTH -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS) to
+                "Here's Bluetooth. Android won't let apps flip it directly."
+            SettingsPage.GENERAL -> Intent(Settings.ACTION_SETTINGS) to "Here are your settings."
+        }
+        return if (launch(intent)) ActionResult.Success(message) else ActionResult.Failure("Couldn't open settings")
+    }
+
+    private fun playMusic(c: Command.PlayMusic): ActionResult {
+        val pkg = c.app?.let { (findApp(it) ?: findApp(it, fuzzy = true))?.pkg }
+        val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+            .putExtra(SearchManager.QUERY, c.query)
+        if (pkg != null) intent.setPackage(pkg)
+        val msg = pick("Playing ${c.query}.", "Putting on ${c.query}.", "Here's ${c.query}.")
+        return ActionResult.Success(msg) {
+            if (!launch(intent)) {
+                launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(c.query))))
+            }
+        }
+    }
+
+    private fun reminder(c: Command.Reminder): ActionResult {
+        val intent = if (c.seconds != null) {
+            Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, c.seconds)
+        } else {
+            Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, c.hour).putExtra(AlarmClock.EXTRA_MINUTES, c.minute)
+        }.putExtra(AlarmClock.EXTRA_MESSAGE, c.text).putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        if (!launch(intent)) return ActionResult.Failure("No clock app can set reminders")
+        val whenText = if (c.seconds != null) "in ${formatDuration(c.seconds)}" else "at " +
+            SimpleDateFormat("h:mm a", Locale.getDefault()).format(Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, c.hour); set(Calendar.MINUTE, c.minute) }.time)
+        return ActionResult.Success("Okay, I'll remind you to ${c.text} $whenText.")
+    }
+
+    // ---- Helpers ----
+
+    private fun launch(intent: Intent): Boolean = try {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        app.startActivity(intent)
+        true
+    } catch (e: ActivityNotFoundException) {
+        false
+    } catch (e: SecurityException) {
+        false
+    }
+
+    private fun formatDuration(seconds: Int): String {
+        val h = seconds / 3600
+        val m = (seconds % 3600) / 60
+        val s = seconds % 60
+        return buildList {
+            if (h > 0) add("$h hr")
+            if (m > 0) add("$m min")
+            if (s > 0) add("$s sec")
+        }.joinToString(" ")
+    }
+}

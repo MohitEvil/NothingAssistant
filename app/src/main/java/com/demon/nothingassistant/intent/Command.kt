@@ -1,0 +1,430 @@
+package com.demon.nothingassistant.intent
+
+enum class VolumeAction { UP, DOWN, MUTE, SET }
+enum class MediaKey { PLAY, PAUSE, NEXT, PREVIOUS }
+enum class SettingsPage { INTERNET, BLUETOOTH, GENERAL }
+enum class LevelAction { UP, DOWN, SET, AUTO }
+enum class VolStream { MEDIA, RING, ALARM, NOTIFICATION, CALL }
+enum class RingerMode { SILENT, VIBRATE, NORMAL }
+enum class StatusKind { STORAGE, RAM, NETWORK, WIFI, BLUETOOTH, AIRPLANE, DND, BRIGHTNESS }
+enum class AppOp { INFO, UNINSTALL, FORCE_STOP, CLEAR_CACHE }
+enum class GlobalKey { BACK, HOME, RECENTS, NOTIFICATIONS, QUICK_SETTINGS, SCREENSHOT, POWER_MENU, SPLIT }
+enum class TapKind { TAP, LONG, DOUBLE }
+enum class SwipeDir { LEFT, RIGHT, UP, DOWN }
+enum class ClipOp { SELECT_ALL, COPY, PASTE, CUT }
+enum class ValueKind { SMALLEST_WIDTH, ANIMATION }
+enum class ScreenAct { TAP, LONG, DOUBLE, ASK, DELETE }
+enum class NavOp { GO, NEARBY, DISTANCE, TIME, ROUTE }
+enum class NotifOp { SUMMARY, READ, READ_NTH, FROM, OPEN, REPLY, NEEDS_REPLY, CLEAR, CLEAR_ALL, HISTORY, WHO, REPLY_ASK, DROP }
+
+/** Everything the assistant knows how to do. */
+sealed class Command {
+    /** Text shown while the command is running (the EXECUTING status line). */
+    abstract fun describe(): String
+
+    /** on == null means toggle. */
+    data class Flashlight(val on: Boolean?) : Command() {
+        override fun describe() = when (on) {
+            true -> "Turning flashlight on…"
+            false -> "Turning flashlight off…"
+            null -> "Toggling flashlight…"
+        }
+    }
+
+    data class OpenApp(val name: String) : Command() {
+        override fun describe() = "Opening $name…"
+    }
+
+    data class SetTimer(val seconds: Int) : Command() {
+        override fun describe() = "Starting timer…"
+    }
+
+    data class SetAlarm(val hour: Int, val minute: Int) : Command() {
+        override fun describe() = "Setting alarm…"
+    }
+
+    data class Call(val target: String) : Command() {
+        override fun describe() = "Finding $target…"
+    }
+
+    /** Parsed from speech; resolved to [ComposeSms] (and confirmed by the user) before it runs. */
+    data class SendSms(val recipient: String, val body: String) : Command() {
+        override fun describe() = "Preparing message…"
+    }
+
+    data class ComposeSms(val number: String, val displayName: String, val body: String) : Command() {
+        override fun describe() = "Opening Messages…"
+    }
+
+    data class Volume(val action: VolumeAction, val percent: Int = 0, val stream: VolStream = VolStream.MEDIA) : Command() {
+        override fun describe() = "Adjusting volume…"
+    }
+
+    data class Media(val key: MediaKey) : Command() {
+        override fun describe() = "Controlling media…"
+    }
+
+    data class Search(val query: String) : Command() {
+        override fun describe() = "Searching the web…"
+    }
+
+    data class Navigate(val place: String) : Command() {
+        override fun describe() = "Opening maps…"
+    }
+
+    data class OpenSettings(val page: SettingsPage) : Command() {
+        override fun describe() = "Opening settings…"
+    }
+
+    data object Battery : Command() {
+        override fun describe() = "Checking battery…"
+    }
+
+    data object TimeNow : Command() {
+        override fun describe() = "Checking the time…"
+    }
+
+    data object DateToday : Command() {
+        override fun describe() = "Checking the date…"
+    }
+
+    data object Camera : Command() {
+        override fun describe() = "Opening camera…"
+    }
+
+    /** Opens an exact installed app (after the user said yes to "Do you mean ...?"). */
+    data class LaunchPackage(val pkg: String, val label: String) : Command() {
+        override fun describe() = "Opening $label…"
+    }
+
+    /** Opens any Settings page by name. [exact] is false when the name was only a close match the user confirmed. */
+    data class OpenSetting(val name: String) : Command() {
+        override fun describe() = "Opening settings…"
+    }
+
+    data class Brightness(val action: LevelAction, val percent: Int = 0) : Command() {
+        override fun describe() = "Adjusting brightness…"
+    }
+
+    /** auto == null means toggle. */
+    data class Rotation(val auto: Boolean?) : Command() {
+        override fun describe() = "Changing rotation…"
+    }
+
+    data class ScreenTimeout(val seconds: Int) : Command() {
+        override fun describe() = "Setting screen timeout…"
+    }
+
+    /** on == null means toggle. */
+    data class Dnd(val on: Boolean?) : Command() {
+        override fun describe() = "Changing Do Not Disturb…"
+    }
+
+    data class Ringer(val mode: RingerMode) : Command() {
+        override fun describe() = "Changing sound mode…"
+    }
+
+    data object LockScreen : Command() {
+        override fun describe() = "Locking the phone…"
+    }
+
+    /** Notifications by position or sender: read, open, reply, clear, "any from X". [nth] is 1-based from the newest, negative from the oldest. */
+    data class Notif(val op: NotifOp, val who: String = "", val nth: Int? = null, val text: String = "") : Command() {
+        override fun describe() = "Checking notifications…"
+    }
+
+    /** "Search X on Instagram": open that app and use its own search box. Falls back to the web if there is no such app. */
+    data class AppSearch(val app: String, val query: String) : Command() {
+        override fun describe() = "Searching $query on $app…"
+    }
+
+    /** "Search X": use the search box of the app in front; only if there is none, search the web. */
+    data class SmartSearch(val query: String) : Command() {
+        override fun describe() = "Searching for $query…"
+    }
+
+    /** "Play X on Namida", "play a random song", "play a video": [app] null means the default music/video app from Settings. [query] null = anything. */
+    data class PlayIn(val app: String?, val query: String?, val video: Boolean = false) : Command() {
+        override fun describe() = "Playing…"
+    }
+
+    data class InstallApp(val name: String) : Command(), Screen {
+        override fun describe() = "Finding $name on the Play Store…"
+    }
+
+    /** Update an installed app from the Play Store. [approved] = the user already said yes to "want me to update it?". */
+    data class UpdateApp(val name: String, val approved: Boolean = false) : Command(), Screen {
+        override fun describe() = "Checking $name for updates…"
+    }
+
+    /**
+     * Maps and navigation. GO = start navigating to [to]; NEARBY = find [to] (a kind of place) around [from] or the phone;
+     * DISTANCE / TIME / ROUTE = between [from] (blank = here) and [to]. [mode] is driving, walking, cycling or transit; [app] an app name or null.
+     */
+    data class Nav(val op: NavOp, val to: String, val from: String = "", val mode: String = "driving", val app: String? = null) : Command() {
+        override fun describe() = "Checking the map…"
+    }
+
+    /** Start a dictated message: asks what to say, then sends it. */
+    data class AskMessage(val contact: String, val app: String?) : Command() {
+        override fun describe() = "Getting ready to message $contact…"
+    }
+
+    data class News(val topic: String = "") : Command() {
+        override fun describe() = "Fetching the news…"
+    }
+
+    /** Speak [text] aloud (used by scheduled reminders and announcements). */
+    data class Say(val text: String) : Command() {
+        override fun describe() = "Saying it…"
+    }
+
+    /** Keep the screen on for [minutes]; 0 turns it off. */
+    data class KeepAwake(val minutes: Int) : Command() {
+        override fun describe() = "Keeping the screen awake…"
+    }
+
+    /** Schedule [macro] (a command to run by itself later). */
+    data class AddMacro(val macro: com.demon.nothingassistant.auto.Macro) : Command() {
+        override fun describe() = "Scheduling that…"
+    }
+
+    /** op: LIST, CLEAR_ALL, DELETE (arg = words from the task), DELETE_LAST, PAUSE, RESUME. */
+    data class MacroManage(val op: String, val arg: String = "") : Command() {
+        override fun describe() = "Checking scheduled tasks…"
+    }
+
+    /**
+     * Deep system controls. [op]: LOC_AUDIT, REVOKE_LOC (a = app), STORAGE, CLEAR_CACHE_ALL, CLEAR_DATA (a = app),
+     * ANIMATIONS (a = on/off), KILL_ALL, REBOOT, SHELL (a = command), TAP (a = "x,y"). [b] = "ok" once the user confirmed.
+     * Needs Shizuku or root for some; the rest works without.
+     */
+    data class Priv(val op: String, val a: String = "", val b: String = "") : Command() {
+        override fun describe() = "Working on the system…"
+    }
+
+    /** A multi-step job in other apps (order food, book a ride, make a reservation) that stops before paying. */
+    data class Task(val goal: String) : Command(), Screen {
+        override fun describe() = "Working through that in the app…"
+    }
+
+    data class Weather(val place: String?, val tomorrow: Boolean = false) : Command() {
+        override fun describe() = "Checking the weather…"
+    }
+
+    /** clear == false reads them aloud, true dismisses them all. */
+    data class Notifications(val clear: Boolean) : Command() {
+        override fun describe() = "Checking notifications…"
+    }
+
+    data object Agenda : Command() {
+        override fun describe() = "Checking your calendar…"
+    }
+
+    data class AddEvent(val title: String) : Command() {
+        override fun describe() = "Opening calendar…"
+    }
+
+    data class Email(val to: String, val body: String) : Command() {
+        override fun describe() = "Opening email…"
+    }
+
+    data class OpenUrl(val url: String) : Command() {
+        override fun describe() = "Opening website…"
+    }
+
+    data object Wallpaper : Command() {
+        override fun describe() = "Opening wallpapers…"
+    }
+
+    data class Status(val kind: StatusKind) : Command() {
+        override fun describe() = "Checking…"
+    }
+
+    /** [pkg] is set once the user confirmed a close match. */
+    data class AppAction(val op: AppOp, val name: String, val pkg: String? = null) : Command() {
+        override fun describe() = "Finding $name…"
+    }
+
+    data class CopyText(val text: String) : Command() {
+        override fun describe() = "Copying…"
+    }
+
+    data object ReadClipboard : Command() {
+        override fun describe() = "Reading clipboard…"
+    }
+
+    data object ShowAlarms : Command() {
+        override fun describe() = "Opening alarms…"
+    }
+
+    /** Flip a system switch (Wi-Fi, Bluetooth, developer options, ...). on == null means toggle. */
+    data class Toggle(val key: String, val on: Boolean?) : Command() {
+        override fun describe() = "Switching it…"
+    }
+
+    data class SetValue(val kind: ValueKind, val value: String) : Command() {
+        override fun describe() = "Changing the setting…"
+    }
+
+    data class GlobalAction(val key: GlobalKey) : Command(), Screen {
+        override fun describe() = "On it…"
+    }
+
+    /** Marker for commands that work on whatever app is in front (they need the Accessibility service). */
+    interface Screen
+
+    data class UiTap(val label: String, val kind: TapKind = TapKind.TAP) : Command(), Screen {
+        override fun describe() = when (kind) {
+            TapKind.TAP -> "Tapping $label…"
+            TapKind.LONG -> "Pressing and holding $label…"
+            TapKind.DOUBLE -> "Double tapping $label…"
+        }
+    }
+
+    data class UiSwipe(val dir: SwipeDir) : Command(), Screen {
+        override fun describe() = "Swiping…"
+    }
+
+    data class UiZoom(val zoomIn: Boolean) : Command(), Screen {
+        override fun describe() = "Zooming…"
+    }
+
+    data class UiClip(val op: ClipOp) : Command(), Screen {
+        override fun describe() = "On it…"
+    }
+
+    data class UiScrollEdge(val top: Boolean) : Command(), Screen {
+        override fun describe() = "Scrolling…"
+    }
+
+    /** Press the keyboard's Enter / Search / Send key. */
+    data object UiEnter : Command(), Screen {
+        override fun describe() = "Submitting…"
+    }
+
+    /** In the current app: find the search box, type [query], submit, and optionally open the best result. */
+    data class UiSearch(val query: String, val pick: Boolean, val first: Boolean = false) : Command(), Screen {
+        override fun describe() = "Searching for $query…"
+    }
+
+    /** In the current app: type [body] into the message box and press Send. */
+    data class UiSend(val body: String) : Command(), Screen {
+        override fun describe() = "Sending…"
+    }
+
+    /** In a messaging app: find [contact], open the chat, type [body] and send. */
+    data class UiMessage(val contact: String, val body: String) : Command(), Screen {
+        override fun describe() = "Messaging $contact…"
+    }
+
+    data class TakePhoto(val selfie: Boolean) : Command(), Screen {
+        override fun describe() = "Taking a picture…"
+    }
+
+    /** Several steps spoken in one sentence, run one after the other. */
+    data class Chain(val steps: List<Command>) : Command(), Screen {
+        override fun describe() = "Working on it…"
+    }
+
+    /** "Wait 10 seconds": pauses a chain (capped at five minutes). */
+    data class Wait(val seconds: Int) : Command(), Screen {
+        override fun describe() = "Waiting $seconds seconds…"
+    }
+
+    /** Sends the newest photo to [contact] through [app] (or the share sheet when no app is named). */
+    data class SharePhoto(val contact: String, val app: String?) : Command(), Screen {
+        override fun describe() = "Sending the photo…"
+    }
+
+    data class UiType(val text: String) : Command(), Screen {
+        override fun describe() = "Typing…"
+    }
+
+    data class UiScroll(val forward: Boolean) : Command(), Screen {
+        override fun describe() = "Scrolling…"
+    }
+
+    /** "Find the search bar", "can you see a login button": looks on the current screen. */
+    data class UiFind(val label: String) : Command(), Screen {
+        override fun describe() = "Looking…"
+    }
+
+    /** Everything that works on what is on screen right now by looking at it (needs the Accessibility service). */
+    sealed class UiX : Command(), Screen
+
+    /**
+     * "Tap Demon", "long press the second toggle", "click the stop button in front of Telegram", "what is right after that".
+     * [target] may be empty or a kind word ("button", "toggle"); [nth] is 1-based (-1 = last); [region] is top/bottom/left/right/topleft/…/middle;
+     * [rel] (front, before, after, below, above, left, right, near) is measured from [anchor] ("it" = the last thing talked about).
+     */
+    data class UiSmart(
+        val target: String,
+        val act: ScreenAct = ScreenAct.TAP,
+        val nth: Int? = null,
+        val region: String? = null,
+        val rel: String? = null,
+        val anchor: String? = null,
+        /** True once the user said "confirm" to a risky tap (Pay, Delete, Transfer...). */
+        val approved: Boolean = false
+    ) : UiX() {
+        override fun describe() = when (act) {
+            ScreenAct.ASK -> "Looking…"
+            ScreenAct.LONG -> "Pressing and holding…"
+            ScreenAct.DOUBLE -> "Double tapping…"
+            ScreenAct.DELETE -> "Deleting…"
+            ScreenAct.TAP -> "Tapping…"
+        }
+    }
+
+    /** "Scroll left", "long scroll down", "keep scrolling up", "scroll down 5 times". */
+    data class UiScrollEx(val dir: String, val times: Int = 1, val keep: Boolean = false) : UiX() {
+        override fun describe() = "Scrolling…"
+    }
+
+    /** Switch a toggle on or off on the current screen ([on] null = flip it). [label] may be empty, "it" or a name. */
+    data class UiSwitch(val label: String, val on: Boolean?) : UiX() {
+        override fun describe() = "Switching…"
+    }
+
+    /** hidekeyboard, refresh, next, prev */
+    /** In the open music or video app: start something random (Shuffle / Play all, or the first song or video). */
+    data class UiPlayRandom(val video: Boolean) : UiX() {
+        override fun describe() = "Starting something…"
+    }
+
+    data class UiMisc(val op: String) : UiX() {
+        override fun describe() = "On it…"
+    }
+
+    data object UiRepeat : UiX() {
+        override fun describe() = "Again…"
+    }
+
+    /** "Find bluetooth", "find developer options": locates a setting or app and opens it. */
+    data class Find(val query: String) : Command() {
+        override fun describe() = "Looking for $query…"
+    }
+
+    data object ReadScreen : Command(), Screen {
+        override fun describe() = "Reading the screen…"
+    }
+
+    data class PlayMusic(val query: String, val app: String?) : Command() {
+        override fun describe() = "Finding $query…"
+    }
+
+    /** Either [seconds] from now, or at [hour]:[minute] when seconds is null. */
+    data class Reminder(val text: String, val seconds: Int?, val hour: Int, val minute: Int) : Command() {
+        override fun describe() = "Setting a reminder…"
+    }
+
+    /** A question or chat line that isn't a phone command. Answered by the AI, or searched on the web. */
+    data class Question(val text: String) : Command() {
+        override fun describe() = "Thinking…"
+    }
+
+    data class Unknown(val text: String) : Command() {
+        override fun describe() = "Thinking…"
+    }
+}
