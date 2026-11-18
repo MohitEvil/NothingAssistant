@@ -22,9 +22,16 @@ class OcrLine(val text: String, val box: Rect)
 object Ocr {
     suspend fun read(svc: AccessibilityService): List<OcrLine>? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
-        return withTimeoutOrNull(6000) {
-            val bmp = screenshot(svc) ?: return@withTimeoutOrNull null
-            recognise(bmp)
+        return withTimeoutOrNull(8000) {
+            // takeScreenshot is rate limited (about one every third of a second): retry once instead of giving up.
+            val bmp = screenshot(svc) ?: run { kotlinx.coroutines.delay(420); screenshot(svc) } ?: return@withTimeoutOrNull null
+            val dm = svc.resources.displayMetrics
+            val sx = dm.widthPixels.toFloat() / bmp.width
+            val sy = dm.heightPixels.toFloat() / bmp.height
+            val lines = recognise(bmp) ?: return@withTimeoutOrNull null
+            // Boxes are in screenshot pixels: convert to screen coordinates so taps land on the words.
+            if (kotlin.math.abs(sx - 1f) < 0.01f && kotlin.math.abs(sy - 1f) < 0.01f) lines
+            else lines.map { OcrLine(it.text, Rect((it.box.left * sx).toInt(), (it.box.top * sy).toInt(), (it.box.right * sx).toInt(), (it.box.bottom * sy).toInt())) }
         }
     }
 
@@ -60,12 +67,10 @@ object Ocr {
                     val box = l.boundingBox ?: continue
                     if (l.text.isNotBlank()) lines.add(OcrLine(l.text.trim(), box))
                 }
-                runCatching { bmp.recycle() }
                 client.close()
                 if (cont.isActive) cont.resume(lines.sortedBy { it.box.top })
             }
             .addOnFailureListener {
-                runCatching { bmp.recycle() }
                 client.close()
                 if (cont.isActive) cont.resume(null)
             }

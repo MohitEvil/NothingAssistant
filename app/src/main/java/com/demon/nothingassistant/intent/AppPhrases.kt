@@ -27,6 +27,7 @@ object AppPhrases {
         // update
         Regex("^(?:update|upgrade)(?: me)?(?: the)? (.+?)(?: app| application)?(?: (?:from|on|in|using|via) (?:the )?(?:play ?store|google play))?$", I).find(t)?.let { m ->
             val name = m.groupValues[1].trim()
+            if (Regex("^(?:it|that|this)$", I).matches(name)) return Command.UpdateApp("@it")
             if (name.isNotEmpty() && !Regex("^(?:it|that|this|all|all apps|apps|my apps|phone|my phone|system|software|os|the system|everything)$", I).matches(name)) return Command.UpdateApp(name)
         }
 

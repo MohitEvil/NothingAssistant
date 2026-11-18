@@ -75,7 +75,9 @@ object Cue {
         }
     }
 
-    private val streams = intArrayOf(AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM)
+    private val streams = intArrayOf(AudioManager.STREAM_MUSIC, AudioManager.STREAM_NOTIFICATION, AudioManager.STREAM_SYSTEM, AudioManager.STREAM_VOICE_CALL, AudioManager.STREAM_RING)
+    /** Streams where muting did not stick (some phones ignore it): their volume was set to 0 instead, and is kept here. */
+    private val lowered = HashMap<Int, Int>()
     private val muted = HashSet<Int>()
     private var unmuteAt = 0L
     private var tick: Runnable? = null
@@ -121,7 +123,11 @@ object Cue {
             if (saved.isEmpty()) return
             val am = audio(context)
             for (st in saved) runCatching { am.adjustStreamVolume(st.toInt(), AudioManager.ADJUST_UNMUTE, 0) }
-            p.edit().remove("muted").apply()
+            p.getString("lowered", "").orEmpty().split(',').filter { it.contains(':') }.forEach { e ->
+                val (a, b) = e.split(':')
+                runCatching { am.setStreamVolume(a.toInt(), b.toInt(), 0) }
+            }
+            p.edit().remove("muted").remove("lowered").apply()
         }
     }
 
@@ -130,15 +136,23 @@ object Cue {
         for (st in streams) {
             if (st in muted || am.isStreamMute(st)) continue
             try { am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0); muted.add(st); changed = true } catch (_: SecurityException) { }
+            // Headphones and some Nothing OS builds ignore mute on a stream: drop its volume to 0 as well.
+            if (st in muted && !am.isStreamMute(st) && st !in lowered) {
+                try { val v = am.getStreamVolume(st); if (v > 0) { lowered[st] = v; am.setStreamVolume(st, 0, 0) } } catch (_: SecurityException) { }
+            } else if (st !in muted && st != AudioManager.STREAM_RING && !am.isStreamMute(st) && st !in lowered && (st == AudioManager.STREAM_MUSIC || st == AudioManager.STREAM_VOICE_CALL)) {
+                try { val v = am.getStreamVolume(st); if (v > 0) { lowered[st] = v; am.setStreamVolume(st, 0, 0); muted.add(st); changed = true } } catch (_: SecurityException) { }
+            }
         }
-        if (changed) prefs(c).edit().putStringSet("muted", muted.map { it.toString() }.toSet()).apply()
+        if (changed || lowered.isNotEmpty()) prefs(c).edit().putStringSet("muted", muted.map { it.toString() }.toSet()).putString("lowered", lowered.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
     }
 
     private fun release(c: Context, am: AudioManager) {
         tick?.let { main.removeCallbacks(it) }
         tick = null
         for (st in muted) runCatching { am.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0) }
-        if (muted.isNotEmpty()) prefs(c).edit().remove("muted").apply()
+        for ((st, v) in lowered) runCatching { am.setStreamVolume(st, v, 0) }
+        if (muted.isNotEmpty() || lowered.isNotEmpty()) prefs(c).edit().remove("muted").remove("lowered").apply()
+        lowered.clear()
         muted.clear()
         unmuteAt = 0
     }

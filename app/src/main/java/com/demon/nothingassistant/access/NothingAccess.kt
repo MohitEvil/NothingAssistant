@@ -55,11 +55,22 @@ class NothingAccess : AccessibilityService() {
 
     // ---- Reading the screen ----
 
-    /** Every window on screen except our own, so "tap Settings" never hits the assistant's own panel. */
+    /**
+     * App windows on screen, front-most first, never our own. Keyboard and system-bar windows are left out
+     * (unless they are the active window, e.g. the notification shade), so the first entry is the real app in front.
+     */
     private fun roots(includeOwn: Boolean = false): List<AccessibilityNodeInfo> {
         val out = ArrayList<AccessibilityNodeInfo>()
         runCatching {
-            windows?.forEach { w -> w.root?.let { r -> if (includeOwn || r.packageName != packageName) out.add(r) } }
+            val ws = (windows ?: emptyList()).sortedWith(compareByDescending<android.view.accessibility.AccessibilityWindowInfo> { it.isActive }.thenByDescending { it.layer })
+            for (w in ws) {
+                if (w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue
+                val r = w.root ?: continue
+                val pkg = r.packageName?.toString().orEmpty()
+                if (!includeOwn && pkg == packageName) continue
+                if (pkg == "com.android.systemui" && !w.isActive) continue
+                out.add(r)
+            }
         }
         if (out.isEmpty()) {
             rootInActiveWindow?.let { if (includeOwn || it.packageName != packageName) out.add(it) }
@@ -190,6 +201,25 @@ class NothingAccess : AccessibilityService() {
         return tapCentre(n)
     }
 
+    /**
+     * Clicks, then checks that the screen really changed. If the node action did nothing (common with custom rows),
+     * taps the real position with a gesture. [expectChange] false skips the check (toggles that leave the page as is).
+     */
+    suspend fun clickSure(n: AccessibilityNodeInfo, expectChange: Boolean = true): Boolean {
+        val before = signature()
+        val stateBefore = runCatching { n.isChecked to n.isSelected }.getOrNull()
+        val first = click(n)
+        delay(450)
+        if (!expectChange) return first
+        val changed = signature() != before ||
+            runCatching { n.refresh(); (n.isChecked to n.isSelected) != stateBefore }.getOrDefault(false)
+        if (changed) return true
+        val c = centre(n) ?: return first
+        tapAt(c.first, c.second)
+        delay(450)
+        return true
+    }
+
     private fun tapCentre(n: AccessibilityNodeInfo): Boolean {
         val r = Rect()
         n.getBoundsInScreen(r)
@@ -313,6 +343,9 @@ class NothingAccess : AccessibilityService() {
 
     fun frontPackage(): String = roots().firstOrNull()?.packageName?.toString().orEmpty()
 
+    /** True if the screen has any app window (ours excluded) from [pkg]. */
+    fun hasPackage(pkg: String): Boolean = roots().any { it.packageName?.toString() == pkg }
+
     /** Long press: the node's own long-click action (cannot be cancelled by a touch), else a held gesture. */
     fun longClick(n: AccessibilityNodeInfo, holdMs: Long = 800): Boolean {
         var c: AccessibilityNodeInfo? = n
@@ -348,13 +381,22 @@ class NothingAccess : AccessibilityService() {
 
     fun swipe(dir: String): Boolean {
         val dm = resources.displayMetrics
-        val w = dm.widthPixels.toFloat()
-        val h = dm.heightPixels.toFloat()
+        // Swipe inside the biggest scrollable area when there is one, else inside the app window (never the status bar or gesture bar).
+        val area = Rect()
+        val sc = scrollables().firstOrNull()
+        if (sc != null) sc.getBoundsInScreen(area) else area.set(0, (dm.heightPixels * 0.08f).toInt(), dm.widthPixels, (dm.heightPixels * 0.90f).toInt())
+        if (area.width() < 100 || area.height() < 100) area.set(0, (dm.heightPixels * 0.08f).toInt(), dm.widthPixels, (dm.heightPixels * 0.90f).toInt())
+        val l = area.left + area.width() * 0.18f
+        val r = area.left + area.width() * 0.82f
+        val t = area.top + area.height() * 0.25f
+        val b = area.top + area.height() * 0.75f
+        val cx = area.exactCenterX()
+        val cy = area.exactCenterY()
         val (x1, y1, x2, y2) = when (dir) {
-            "left" -> listOf(w * 0.8f, h * 0.5f, w * 0.2f, h * 0.5f)
-            "right" -> listOf(w * 0.2f, h * 0.5f, w * 0.8f, h * 0.5f)
-            "up" -> listOf(w * 0.5f, h * 0.7f, w * 0.5f, h * 0.3f)
-            else -> listOf(w * 0.5f, h * 0.3f, w * 0.5f, h * 0.7f)
+            "left" -> listOf(r, cy, l, cy)
+            "right" -> listOf(l, cy, r, cy)
+            "up" -> listOf(cx, b, cx, t)
+            else -> listOf(cx, t, cx, b)
         }
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
         return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 260)).build(), null, null)
@@ -443,6 +485,35 @@ class NothingAccess : AccessibilityService() {
         }
         best?.let { return it to false }
         findEditable()?.let { return it to true }
+        return null
+    }
+
+    /** The text box of an open chat: prefers "Message"/"Type"/"Reply" hints, avoids search fields, then the lowest box on screen. */
+    fun findMessageBox(): AccessibilityNodeInfo? {
+        val list = ArrayList<Pair<Int, AccessibilityNodeInfo>>()
+        val r = Rect()
+        for (root in roots()) {
+            walk(root) { n ->
+                if (n.isEditable && n.isVisibleToUser) {
+                    val l = (n.text?.toString().orEmpty() + " " + n.hintText + " " + n.contentDescription).lowercase()
+                    n.getBoundsInScreen(r)
+                    var score = r.centerY() / 10
+                    if (Regex("message|type|write|reply|say something|chat").containsMatchIn(l)) score += 1000
+                    if (l.contains("search")) score -= 2000
+                    list.add(score to n)
+                }
+                false
+            }
+        }
+        return list.maxByOrNull { it.first }?.second
+    }
+
+    suspend fun waitMessageBox(ms: Long = 2500): AccessibilityNodeInfo? {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            findMessageBox()?.let { return it }
+            delay(80)
+        }
         return null
     }
 

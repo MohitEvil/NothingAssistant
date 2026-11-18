@@ -442,13 +442,47 @@ class UiControl(context: Context) {
     suspend fun send(body: String): ActionResult = withContext(Dispatchers.Default) {
         val svc = NothingAccess.instance ?: return@withContext needAccess("send messages")
         clearWay(svc)
-        val field = svc.waitEditable(2000) ?: return@withContext ActionResult.Failure("I can't find the message box.")
+        val field = svc.waitMessageBox(2500) ?: run {
+            // The accessibility tree shows no box: read the screen and tap where a message box usually says "Message".
+            val line = Ocr.read(svc)?.firstOrNull { Regex("^(?:type a )?(?:message|write a message|reply)").containsMatchIn(it.text.lowercase().trim()) }
+            if (line != null) {
+                svc.tapAt(line.box.exactCenterX(), line.box.exactCenterY())
+                delay(400)
+                svc.waitMessageBox(1200)
+            } else null
+        } ?: return@withContext ActionResult.Failure("I can't find a message box here. Open the chat first.")
         svc.click(field)
-        delay(80)
-        if (!svc.setText(body)) return@withContext ActionResult.Failure("I couldn't type the message.")
-        delay(250)
-        val send = svc.waitFind(listOf("Send", "Send message", "Send button"), 1200)
-        val ok = if (send != null) svc.click(send) else svc.imeEnter()
+        delay(120)
+        var typed = svc.setText(body)
+        if (!typed) {
+            // Some boxes refuse SET_TEXT: paste through the clipboard instead.
+            runCatching {
+                val cm = app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("text", body))
+                field.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS)
+                typed = field.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_PASTE)
+            }
+        }
+        if (!typed) return@withContext ActionResult.Failure("I couldn't type into the message box.")
+        delay(350)
+        // Send is usually an icon that only appears once there is text.
+        var send = svc.waitFind(listOf("Send", "Send message", "Send button", "Submit", "Post"), 1500)
+        if (send != null && send.isEditable) send = null
+        var ok = false
+        if (send != null) ok = svc.clickSure(send, expectChange = false)
+        if (!ok) {
+            val line = Ocr.read(svc)?.firstOrNull { it.text.lowercase().trim() in setOf("send", "post", "submit") }
+            if (line != null) ok = svc.tapAt(line.box.exactCenterX(), line.box.exactCenterY())
+        }
+        if (!ok) {
+            // Right edge of the message box is where Send sits in nearly every chat app.
+            val r = android.graphics.Rect()
+            field.refresh()
+            field.getBoundsInScreen(r)
+            val dm = app.resources.displayMetrics
+            if (!r.isEmpty && svc.waitFind(listOf("Send"), 200) == null) ok = svc.imeEnter()
+            if (!ok && !r.isEmpty) ok = svc.tapAt(dm.widthPixels - dm.widthPixels * 0.06f, r.exactCenterY())
+        }
         if (ok) ActionResult.Success("Sent.") else ActionResult.Failure("I typed the message but couldn't find Send.")
     }
 

@@ -45,6 +45,22 @@ object Chain {
 
     private const val APPS = "whatsapp|telegram|messages|message|signal|instagram|messenger|sms|gmail|slack|discord"
 
+    private val notText = setOf("it", "that", "this", "them", "photo", "photos", "picture", "pictures", "pic", "pics", "image", "images", "screenshot", "location", "file", "files", "video", "videos", "selfie", "money", "a photo", "a picture", "a pic", "the photo", "the picture", "the screenshot", "my location", "the file", "a video", "the video", "the image", "the last photo", "last photo", "latest photo", "the latest photo")
+
+    /** Inside an open chat: "send hi", "type hi and send it (to him)", "reply thanks". */
+    private fun inChat(s: String): Command? {
+        Regex("^(?:type|write|enter)\\s+[\"'“‘]?(.+?)[\"'”’]?\\s+and\\s+(?:send|post|submit)(?:\\s+it)?(?:\\s+to\\s+(?:him|her|them|this (?:chat|person|contact)))?$", I).find(s)?.let { m ->
+            return Command.UiSend(m.groupValues[1].trim())
+        }
+        Regex("^(?:send|reply)(?:\\s+(?:a\\s+)?(?:message|text|reply))?\\s+[\"'“‘]?(.+?)[\"'”’]?(?:\\s+to\\s+(?:him|her|them|this (?:chat|person|contact)))?$", I).find(s)?.let { m ->
+            val body = m.groupValues[1].trim()
+            if (body.isEmpty() || body.lowercase() in notText || Regex("\\bto\\b", I).containsMatchIn(body)) return null
+            if (Regex("^(?:the |a |my )?(?:last |latest |recent )?(?:photo|picture|pic|image|screenshot|video|file|location)s?\\b", I).containsMatchIn(body)) return null
+            return Command.UiSend(body)
+        }
+        return null
+    }
+
     fun parse(raw: String): Command? {
         val s = raw.trim().trimEnd('.', '!', '?')
         // "send hi to demon on telegram", "message demon hi on whatsapp"
@@ -54,6 +70,7 @@ object Chain {
         Regex("^(?:message|msg|text)\\s+[\"'“‘]?(\\w+)[\"'”’]?\\s+(?:saying\\s+|that\\s+)?(.+?)\\s+(?:on|in|via|using|through)\\s+($APPS)$", I).find(s)?.let { m ->
             return Command.Chain(listOf(Command.OpenApp(m.groupValues[3]), Command.UiMessage(m.groupValues[1], m.groupValues[2].trim())))
         }
+        inChat(s)?.let { return it }
         if (!hint.containsMatchIn(s)) return null
         val parts = split(s)
         if (parts.size < 2) return null

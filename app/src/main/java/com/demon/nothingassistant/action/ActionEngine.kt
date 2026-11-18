@@ -134,8 +134,16 @@ class ActionEngine(context: Context) {
         is Command.AppSearch -> appSearch(cmd)
         is Command.SmartSearch -> smartSearch(cmd)
         is Command.PlayIn -> playIn(cmd)
-        is Command.InstallApp -> play.run(cmd.name, PlayStore.Mode.INSTALL)
-        is Command.UpdateApp -> play.run(cmd.name, PlayStore.Mode.UPDATE, cmd.approved)
+        is Command.InstallApp -> {
+            val n = Subject.resolve(cmd.name)
+            if (n == null) ActionResult.Failure("Which app do you mean? Say the app's name, like “install Telegram”.")
+            else { Subject.set(n); play.run(n, PlayStore.Mode.INSTALL) }
+        }
+        is Command.UpdateApp -> {
+            val n = Subject.resolve(cmd.name)
+            if (n == null) ActionResult.Failure("Which app do you mean? Say the app's name, like “update Telegram”.")
+            else { Subject.set(n); play.run(n, PlayStore.Mode.UPDATE, cmd.approved) }
+        }
         is Command.Notif -> notify.run(cmd)
         is Command.Toggle -> (cmd.on?.let { priv.quickToggle(cmd.key, it) }) ?: ui.toggle(cmd.key, cmd.on)
         is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
@@ -534,6 +542,11 @@ class ActionEngine(context: Context) {
     }
 
     private fun openApp(name: String): ActionResult {
+        val resolved = Subject.resolve(name) ?: return ActionResult.Failure("Which app do you mean? Say its name.")
+        return openAppNamed(resolved).also { if (it is ActionResult.Success) Subject.set(resolved) }
+    }
+
+    private fun openAppNamed(name: String): ActionResult {
         val cleaned = com.demon.nothingassistant.intent.Canon.phrase(name).removePrefix("the ").removeSuffix(" app").trim()
         val q = alias(norm(cleaned))
         if (q.isEmpty()) return ActionResult.Failure("Which app should I open?")
