@@ -23,6 +23,7 @@ import com.demon.nothingassistant.data.Settings
 import com.demon.nothingassistant.data.ThemeMode
 import com.demon.nothingassistant.ui.DarkPalette
 import com.demon.nothingassistant.ui.LightPalette
+import com.demon.nothingassistant.ui.withAccent
 import com.demon.nothingassistant.ui.PanelScreen
 import com.demon.nothingassistant.ui.rememberPerfMode
 
@@ -80,7 +81,7 @@ class PanelActivity : ComponentActivity() {
         autoStart = !intent.getBooleanExtra("quiet", false)
         current = this
         enableEdgeToEdge()
-        setContent { Root() }
+        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing)) { Root() } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -121,7 +122,7 @@ class PanelActivity : ComponentActivity() {
             ThemeMode.LIGHT -> false
             else -> isSystemInDarkTheme()
         }
-        val palette = if (dark) DarkPalette else LightPalette
+        val palette = (if (dark) DarkPalette else LightPalette).withAccent(settings.accent)
         val perf = rememberPerfMode(settings)
         var seenActive by remember { mutableStateOf(false) }
 

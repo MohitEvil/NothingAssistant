@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -44,7 +45,6 @@ import com.demon.nothingassistant.data.Settings
 import com.demon.nothingassistant.data.ThemeMode
 import kotlinx.coroutines.launch
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     settings: Settings,
@@ -55,6 +55,7 @@ fun SettingsScreen(
     onOpenAi: () -> Unit,
     onOpenAccess: () -> Unit,
     onOpenVoice: () -> Unit,
+    onOpenAppearance: () -> Unit,
     onOpenLog: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -62,7 +63,7 @@ fun SettingsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.bg)
+            .glassBackdrop(palette)
             .systemBarsPadding()
             .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())
@@ -76,7 +77,7 @@ fun SettingsScreen(
                 fontFamily = mono,
                 fontSize = 11.sp,
                 letterSpacing = 2.sp,
-                modifier = Modifier.clickable(onClick = onClose).padding(vertical = 8.dp, horizontal = 4.dp)
+                modifier = Modifier.squish(onClick = onClose).padding(vertical = 8.dp, horizontal = 4.dp)
             )
         }
         Spacer(Modifier.height(20.dp))
@@ -84,27 +85,14 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
 
         Card(palette) {
+            ToggleRow("Spoken replies", "The assistant talks back and asks you questions", settings.speakReplies, palette) { settings.setSpeakReplies(it) }
+            Divider(palette)
+            // One switch for both old options: they did the same job.
+            ToggleRow("Keep listening", "The mic reopens after each answer or task, so you can just reply. Say ok, thanks or stop to close", settings.followUp || settings.stayOpen, palette) {
+                settings.setFollowUp(it); settings.setStayOpen(it)
+            }
+            Divider(palette)
             ToggleRow("Use haptics", "Short taps for key moments only", settings.haptics, palette) { settings.setHaptics(it) }
-            Divider(palette)
-            ToggleRow("Show animations", "Off draws static glyphs", settings.animations, palette) { settings.setAnimations(it) }
-            Divider(palette)
-            ToggleRow("Battery saver mode", "Simpler visuals, lower power", settings.batterySaver, palette) { settings.setBatterySaver(it) }
-            Divider(palette)
-            ToggleRow("Prefer offline speech", "Uses the on-device model when installed", settings.preferOffline, palette) {
-                settings.setPreferOffline(it)
-            }
-            Divider(palette)
-            ToggleRow("Spoken replies", "The assistant talks back and asks you questions", settings.speakReplies, palette) {
-                settings.setSpeakReplies(it)
-            }
-            Divider(palette)
-            ToggleRow("Keep listening for follow-ups", "Mic reopens after an answer, so you can just reply", settings.followUp, palette) {
-                settings.setFollowUp(it)
-            }
-            Divider(palette)
-            ToggleRow("Stay open between tasks", "After each task keep listening for the next one. Say ok, thanks or stop to close", settings.stayOpen, palette) {
-                settings.setStayOpen(it)
-            }
             Divider(palette)
             ToggleRow("Floating bubble", "Draws over other apps. Tap to talk.", settings.bubble, palette, onBubbleToggle)
         }
@@ -116,112 +104,23 @@ fun SettingsScreen(
             AppPickRow("Default video app", "Used for \"play a video\" when you don't name an app", settings.videoApp, palette) { settings.setVideoApp(it) }
         }
 
-        Spacer(Modifier.height(16.dp))
-        AdvancedAccessCard(settings, palette)
-
-        Spacer(Modifier.height(16.dp))
-        Card(palette) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenVoice)
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Voice", color = palette.fg, fontSize = 15.sp)
-                    Text("Offline neural voices, speaker and speed", color = palette.muted, fontSize = 12.sp)
-                }
-                Text("›", color = palette.muted, fontSize = 20.sp)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Card(palette) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenLog)
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Debug log", color = palette.fg, fontSize = 15.sp)
-                    Text("Temporary: see what the app and voices are doing", color = palette.muted, fontSize = 12.sp)
-                }
-                Text("›", color = palette.muted, fontSize = 20.sp)
-            }
-        }
-
         Spacer(Modifier.height(24.dp))
-        SectionLabel("LANGUAGE", palette)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf("EN-IN" to "en-IN", "EN-US" to "en-US", "HI-IN" to "hi-IN").forEach { (name, tag) ->
-                Chip(name, settings.language == tag, palette) { settings.setLanguage(tag) }
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-        SectionLabel("THEME", palette)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf("SYSTEM" to ThemeMode.SYSTEM, "DARK" to ThemeMode.DARK, "LIGHT" to ThemeMode.LIGHT).forEach { (name, mode) ->
-                Chip(name, settings.theme == mode, palette) { settings.setTheme(mode) }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
+        SectionLabel("CUSTOMISE", palette)
         Card(palette) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenAi)
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("AI settings", color = palette.fg, fontSize = 15.sp)
-                    Text(
-                        "Chat: " + (if (!settings.aiEnabled) "off" else settings.providers.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider") +
-                            "  ·  Voice: " + (if (!settings.aiVoiceEnabled) "off" else settings.voiceProviders.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider"),
-                        color = palette.muted, fontSize = 12.sp
-                    )
-                }
-                Text("›", color = palette.muted, fontSize = 20.sp)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Card(palette) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenAccess)
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Phone control access", color = palette.fg, fontSize = 15.sp)
-                    Text("Grant what the assistant needs to control settings", color = palette.muted, fontSize = 12.sp)
-                }
-                Text("›", color = palette.muted, fontSize = 20.sp)
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Card(palette) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenAppPermissions)
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("App permissions", color = palette.fg, fontSize = 15.sp)
-                    Text("Microphone, contacts, notifications", color = palette.muted, fontSize = 12.sp)
-                }
-                Text("›", color = palette.muted, fontSize = 20.sp)
-            }
+            NavRow(DotIcons.VOICE, "Voice", "Voice, language, speech recognition and speed", palette, onOpenVoice)
+            Divider(palette)
+            NavRow(
+                DotIcons.AI, "AI settings",
+                "Chat: " + (if (!settings.aiEnabled) "off" else settings.providers.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider") +
+                    "  ·  Voice: " + (if (!settings.aiVoiceEnabled) "off" else settings.voiceProviders.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider"),
+                palette, onOpenAi
+            )
+            Divider(palette)
+            NavRow(DotIcons.APPEARANCE, "Appearance", "Theme, liquid glass, blob and animations", palette, onOpenAppearance)
+            Divider(palette)
+            NavRow(DotIcons.ACCESS, "Access and permissions", "Phone control, app permissions, Shizuku and root", palette, onOpenAccess)
+            Divider(palette)
+            NavRow(DotIcons.LOG, "Debug log", "Temporary: see what the app and voices are doing", palette, onOpenLog)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -242,13 +141,31 @@ fun SettingsScreen(
     }
 }
 
+/** A row that opens a page: dot icon, title, one line of state, chevron. */
+@Composable
+internal fun NavRow(icon: List<String>, title: String, subtitle: String, palette: GlyphPalette, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().squish(onClick = onClick).padding(horizontal = 18.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        DotIcon(icon, palette.fg)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = palette.fg, fontSize = 15.sp)
+            Text(subtitle, color = palette.muted, fontSize = 12.sp)
+        }
+        Text("›", color = palette.muted, fontSize = 20.sp)
+    }
+}
+
 @Composable
 internal fun Card(palette: GlyphPalette, content: @Composable () -> Unit) {
+    val glass = LocalUiStyle.current.isGlass
+    val shape = RoundedCornerShape(26.dp)
     Column(
         Modifier
             .fillMaxWidth()
-            .background(palette.card, RoundedCornerShape(24.dp))
-            .border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(24.dp))
+            .then(if (glass) Modifier.glassFill(palette, shape) else Modifier.background(palette.card, shape).border(BorderStroke(1.dp, palette.dim), shape))
     ) { content() }
 }
 
@@ -286,7 +203,7 @@ internal fun ToggleRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable { onChange(!checked) }
+            .squish { onChange(!checked) }
             .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -323,7 +240,7 @@ internal fun Chip(text: String, selected: Boolean, palette: GlyphPalette, onClic
                 if (selected) Modifier.background(palette.fg, shape)
                 else Modifier.border(BorderStroke(1.dp, palette.muted), shape)
             )
-            .clickable(onClick = onClick)
+            .squish(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 10.dp)
     )
 }
@@ -361,7 +278,7 @@ internal fun Field(
 /** Optional Shizuku / root. Off by default behaviour is "auto": used only when it's there and allowed. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun AdvancedAccessCard(settings: Settings, palette: GlyphPalette) {
+internal fun AdvancedAccessCard(settings: Settings, palette: GlyphPalette) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var status by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(com.demon.nothingassistant.priv.Priv.describe(ctx)) }

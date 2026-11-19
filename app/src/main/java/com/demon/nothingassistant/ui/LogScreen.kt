@@ -67,7 +67,7 @@ fun LogScreen(palette: GlyphPalette, onClose: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.bg)
+            .glassBackdrop(palette)
             .systemBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {

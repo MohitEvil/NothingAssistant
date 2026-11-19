@@ -109,6 +109,12 @@ object WebInfo {
         val q = question.trim().trimEnd('?', '.', '!')
         val prev = lastQuestion?.let { clean(it) }?.takeIf { it.isNotBlank() } ?: return q
         val ql = q.lowercase().replace("’", "'")
+        // "how old is he?" after an answer about Narendra Modi: he = the person the last answer was about.
+        lastSubject?.let { subj ->
+            if (Regex("\\b(he|she|him|his|her|hers|they|their|them)\\b").containsMatchIn(ql) && !Regex("\\b(it|that|this)\\b").containsMatchIn(ql.substringBefore("?"))) {
+                return ql.replace(Regex("\\b(his|hers|her|their)\\b"), "$subj's").replace(Regex("\\b(he|she|him|they|them)\\b"), subj)
+            }
+        }
         val pronoun = Regex("\\b(it|its|it's|that|this|those|these|they|their|them|he|his|him|she|her|there)\\b")
         val connector = Regex("^(?:and|also|then|so|but|what about|how about|what else|why|how come|and what|and how|and why|more|tell me more|explain more)\\b")
         // "what about China?" after "population of India": swap the subject, keep the question
@@ -146,6 +152,10 @@ object WebInfo {
         if (text.length > 420) hit -= 0.1
         return Cand(text, hit + bonus)
     }
+
+    /** The person or thing the last answer was about ("Narendra Modi"), so he / she / his / they in the next question have someone to mean. */
+    @Volatile private var lastSubject: String? = null
+    private val subjectRx = Regex("^((?:[A-Z][\\p{L}.'-]+)(?:\\s+(?:[A-Z][\\p{L}.'-]+|of|the|de|bin|van|von|al)){0,4})\\s+(?:is|was|are|were|has|had|born|serves|served|became|became|founded|wrote|directed)\\b")
 
     @Volatile private var lastSentences: List<String> = emptyList()
     @Volatile private var lastIdx = 0
@@ -194,6 +204,7 @@ object WebInfo {
             .maxByOrNull { it.score }
         var out = shorten(best.text)
         if (extra != null && out.length < 230) out = com.demon.nothingassistant.ai.Summarizer.summarize(out + " " + shorten(extra.text), 380, 3, q)
+        lastSubject = subjectRx.find(out.trim())?.groupValues?.get(1)?.takeIf { it.lowercase() !in setOf("it", "the", "this", "there", "india") || false }
         val at = wikiList.indexOf(best.text)
         if (at >= 0) { lastSentences = wikiList; lastIdx = at + maxOf(1, sentences(out).size) } else { lastSentences = emptyList(); lastIdx = 0 }
         out

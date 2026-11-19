@@ -75,7 +75,7 @@ class PlayStore(
     private suspend fun waitFront(svc: NothingAccess, ms: Long): Boolean {
         val end = System.currentTimeMillis() + ms
         while (System.currentTimeMillis() < end) {
-            if (svc.frontPackage() == store) return true
+            if (svc.frontPackage() == store || svc.hasPackage(store)) return true
             delay(150)
         }
         return false
@@ -127,7 +127,7 @@ class PlayStore(
         var lastKick = start
         delay(1200)
         while (System.currentTimeMillis() < end) {
-            if (svc.frontPackage() != store) { delay(1500); if (svc.frontPackage() != store && !update && pmHas(pkg)) return ActionResult.Success("Installed $label."); }
+            if (!svc.hasPackage(store)) { delay(1500); if (!svc.hasPackage(store) && !update && pmHas(pkg)) return ActionResult.Success("Installed $label."); }
             val p = readPage(svc)
             AppLog.d("play", "wait state=${p.state}")
             when (p.state) {
@@ -158,7 +158,13 @@ class PlayStore(
         val uri = if (pkg != null) Uri.parse("market://details?id=$pkg") else Uri.parse("market://search?q=${Uri.encode(name)}&c=apps")
         val intent = Intent(Intent.ACTION_VIEW, uri).setPackage(store).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (runCatching { app.startActivity(intent) }.isFailure) return@withContext ActionResult.Failure("I couldn't open the Play Store.")
-        if (!waitFront(svc, 8000)) return@withContext ActionResult.Failure("The Play Store didn't come to the front. Try again.")
+        var shown = waitFront(svc, 5000) || svc.hasPackage(store)
+        if (!shown) {
+            // Launch again once; then carry on if the store's buttons are on screen, whichever window the phone calls "front".
+            runCatching { app.startActivity(intent) }
+            shown = waitFront(svc, 5000) || svc.hasPackage(store) || svc.find(listOf("Install", "Open", "Update", "Uninstall")) != null
+        }
+        AppLog.d("play", "store shown=$shown front=${svc.frontPackage()}")
         delay(900)
         if (pkg == null && !openFromResults(svc, name)) return@withContext ActionResult.Failure("I searched the Play Store but couldn't see an app called $name. Tell me which result to open.")
         val page = waitPage(svc, 9000)

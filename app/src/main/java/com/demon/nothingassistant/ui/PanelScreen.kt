@@ -65,12 +65,25 @@ fun PanelScreen(
                 .padding(12.dp)
                 .fillMaxWidth()
                 .clip(shape)
-                .background(palette.bg)
-                .border(1.dp, palette.dim, shape)
+                .then(
+                    if (LocalUiStyle.current.isGlass) Modifier.background(palette.bg.copy(alpha = 0.66f)).glassFill(palette, shape)
+                    else Modifier.background(palette.bg).border(1.dp, palette.dim, shape)
+                )
                 .tap {} // taps inside the card must not dismiss it
                 .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
-            LineGlyph(
+            if (LocalUiStyle.current.blob) GlyphVisualizer(
+                state = ui.state,
+                since = ui.since,
+                clock = clock,
+                amplitude = amplitude,
+                animate = animate,
+                palette = palette,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .tap(onTapLine)
+            ) else LineGlyph(
                 state = ui.state,
                 since = ui.since,
                 clock = clock,
@@ -104,7 +117,7 @@ fun PanelScreen(
                             .heightIn(max = 240.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        Text(
+                        TypeText(
                             ui.reply,
                             color = palette.fg,
                             fontSize = 16.sp,
@@ -123,12 +136,10 @@ fun PanelScreen(
                             AssistantState.IDLE -> "Tap the line, then speak"
                             else -> ui.status
                         }
-                        Text(
+                        StatusLine(
                             line,
-                            color = palette.muted,
-                            fontFamily = mono,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center
+                            palette.muted,
+                            loading = ui.state == AssistantState.THINKING || ui.state == AssistantState.EXECUTING || ui.state == AssistantState.LISTENING
                         )
                         if (ui.transcript.isNotBlank() &&
                             (ui.state == AssistantState.THINKING || ui.state == AssistantState.EXECUTING ||

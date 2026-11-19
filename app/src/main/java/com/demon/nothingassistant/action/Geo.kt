@@ -67,6 +67,18 @@ class Geo(private val context: Context) {
     fun place(q: String, near: Pt?): Pt? {
         val t = q.trim().removePrefix("the ").trim()
         if (t.lowercase() in setOf("here", "me", "my location", "my place", "current location", "where i am", "my current location", "this place")) return near ?: here()
+        // The phone's own geocoder (Google data) knows Indian places far better than OpenStreetMap: try it first, near you if known.
+        runCatching {
+            if (android.location.Geocoder.isPresent()) {
+                val g = android.location.Geocoder(context, java.util.Locale.getDefault())
+                @Suppress("DEPRECATION")
+                val list = if (near != null) g.getFromLocationName(t, 3, near.lat - 0.8, near.lon - 0.8, near.lat + 0.8, near.lon + 0.8) else g.getFromLocationName(t, 3)
+                list?.firstOrNull()?.let { a ->
+                    val nm = a.featureName?.takeIf { it.isNotBlank() && !it.first().isDigit() } ?: a.locality ?: t
+                    return Pt(nm, a.latitude, a.longitude)
+                }
+            }
+        }
         val box = near?.let { "&viewbox=${it.lon - 0.6},${it.lat + 0.6},${it.lon + 0.6},${it.lat - 0.6}" }.orEmpty()
         val arr = JSONArray(get("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=3$box&q=" + URLEncoder.encode(t, "UTF-8")))
         val r = arr.optJSONObject(0) ?: return null

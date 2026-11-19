@@ -81,7 +81,7 @@ class ActionEngine(context: Context) {
     /** Called by the controller so long jobs can say "It's updating." out loud. */
     var announce: (String) -> Unit = {}
     private val play = PlayStore(app, ui, { n -> findApp(n)?.takeIf { it.exact }?.let { it.pkg to it.label } }, { priv.ensureAccessibility() }, { m -> onProgress?.invoke(m) }, { m -> announce(m) })
-    private val nav = NavActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.pkg }, { i -> launch(i) })
+    private val nav = NavActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.pkg }, { i -> launch(i) }, { l -> bgScope.launch { delay(2500); ui.pressWhenVisible(l, 14000) } })
 
     /** Package names of the default music / video apps chosen in Settings (empty = none). */
     var musicApp: () -> String = { "" }
@@ -123,6 +123,8 @@ class ActionEngine(context: Context) {
     }
 
     /** Keeps the blackboard current: what "it" means next, and what a switch was before (for undo). */
+    suspend fun setDefaultAssistant(): ActionResult = ui.setDefaultAssistant()
+
     private fun learnFrom(cmd: Command, r: ActionResult) {
         val ok = r is ActionResult.Success
         Blackboard.record(cmd.describe(), cmd, ok, when (r) { is ActionResult.Success -> r.message; is ActionResult.Failure -> r.message; else -> "" })

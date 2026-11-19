@@ -119,6 +119,19 @@ class Settings(context: Context) {
     var theme by mutableIntStateOf(sp.getInt("theme", ThemeMode.SYSTEM))
         private set
 
+    /** Look: 0 plain Nothing, 1 liquid glass, 2 minimal liquid glass. */
+    var glassStyle by mutableIntStateOf(sp.getInt("glass_style", 1))
+        private set
+    /** The listening blob (dot-matrix, Siri-style) instead of the plain ring. */
+    var blob by mutableStateOf(sp.getBoolean("blob", true))
+        private set
+    /** Words appear one by one as the assistant speaks. */
+    var typing by mutableStateOf(sp.getBoolean("typing", true))
+        private set
+    /** red, amber, mint, blue, white */
+    var accent by mutableStateOf(sp.getString("accent", "red") ?: "red")
+        private set
+
     // Voice replies and conversation
     var speakReplies by mutableStateOf(sp.getBoolean("speak_replies", true))
         private set
@@ -269,6 +282,14 @@ class Settings(context: Context) {
     fun setLanguage(v: String) { language = v; sp.edit().putString("language", v).apply() }
     @JvmName("applyTheme")
     fun setTheme(v: Int) { theme = v; sp.edit().putInt("theme", v).apply() }
+    @JvmName("applyGlassStyle")
+    fun setGlassStyle(v: Int) { glassStyle = v; sp.edit().putInt("glass_style", v).apply() }
+    @JvmName("applyBlob")
+    fun setBlob(v: Boolean) { blob = v; sp.edit().putBoolean("blob", v).apply() }
+    @JvmName("applyTyping")
+    fun setTyping(v: Boolean) { typing = v; sp.edit().putBoolean("typing", v).apply() }
+    @JvmName("applyAccent")
+    fun setAccent(v: String) { accent = v; sp.edit().putString("accent", v).apply() }
     @JvmName("applySpeakReplies")
     fun setSpeakReplies(v: Boolean) { speakReplies = v; sp.edit().putBoolean("speak_replies", v).apply() }
     @JvmName("applyStayOpen")

@@ -40,6 +40,10 @@ fun GlyphVisualizer(
     palette: GlyphPalette,
     modifier: Modifier = Modifier
 ) {
+    if (LocalUiStyle.current.blob && state != AssistantState.CONFIRMING) {
+        DotBlob(state, since, clock, amplitude, animate, palette, modifier)
+        return
+    }
     Canvas(modifier) {
         val s = size.minDimension
         val c = Offset(size.width / 2f, size.height / 2f)

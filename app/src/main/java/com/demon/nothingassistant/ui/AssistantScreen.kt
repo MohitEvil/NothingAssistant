@@ -70,7 +70,7 @@ fun AssistantScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.bg)
+            .glassBackdrop(palette)
             .systemBarsPadding()
             .padding(horizontal = 24.dp)
     ) {
@@ -144,7 +144,7 @@ fun AssistantScreen(
                             .heightIn(max = 220.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        Text(
+                        TypeText(
                             ui.reply,
                             color = palette.fg,
                             fontSize = 17.sp,
@@ -164,12 +164,10 @@ fun AssistantScreen(
                     }
                 } else {
                     val subtitle = if (ui.state == AssistantState.IDLE) "Tap the glyph to speak" else ui.status
-                    Text(
+                    StatusLine(
                         subtitle,
-                        color = palette.muted,
-                        fontFamily = mono,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
+                        palette.muted,
+                        loading = ui.state == AssistantState.THINKING || ui.state == AssistantState.EXECUTING || ui.state == AssistantState.RECOGNIZING || ui.state == AssistantState.LISTENING
                     )
 
                     when (ui.state) {

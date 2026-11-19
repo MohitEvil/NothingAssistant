@@ -269,7 +269,14 @@ class NothingAccess : AccessibilityService() {
         val f = field ?: return false
         f.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
-        return f.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        if (f.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return true
+        // Some boxes refuse SET_TEXT: paste instead.
+        return runCatching {
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("text", value))
+            f.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            f.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        }.getOrDefault(false)
     }
 
     fun global(action: Int): Boolean = performGlobalAction(action)

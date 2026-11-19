@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import kotlinx.coroutines.launch
 import android.provider.Settings as AndroidSettings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -33,6 +34,10 @@ import com.demon.nothingassistant.ui.AiVoiceScreen
 import com.demon.nothingassistant.ui.AssistantScreen
 import com.demon.nothingassistant.ui.DarkPalette
 import com.demon.nothingassistant.ui.LightPalette
+import com.demon.nothingassistant.ui.AppearanceScreen
+import com.demon.nothingassistant.ui.withAccent
+import com.demon.nothingassistant.ui.LocalUiStyle
+import com.demon.nothingassistant.ui.UiStyle
 import com.demon.nothingassistant.ui.LogScreen
 import com.demon.nothingassistant.ui.PersonaScreen
 import com.demon.nothingassistant.ui.VoiceScreen
@@ -53,7 +58,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         autoStart = shouldAutoStart(intent)
 
-        setContent { Root() }
+        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing)) { Root() } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -106,13 +111,14 @@ class MainActivity : ComponentActivity() {
         var showAiVoice by remember { mutableStateOf(false) }
         var showAccess by remember { mutableStateOf(false) }
         var showLog by remember { mutableStateOf(false) }
+        var showAppearance by remember { mutableStateOf(false) }
 
         val dark = when (settings.theme) {
             ThemeMode.DARK -> true
             ThemeMode.LIGHT -> false
             else -> isSystemInDarkTheme()
         }
-        val palette = if (dark) DarkPalette else LightPalette
+        val palette = (if (dark) DarkPalette else LightPalette).withAccent(settings.accent)
         val perf = rememberPerfMode(settings)
 
         // Keep the screen awake only while the assistant is actively working.
@@ -165,8 +171,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        BackHandler(enabled = showLog || showAi || showAiVoice || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
+        BackHandler(enabled = showAppearance || showLog || showAi || showAiVoice || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
             when {
+                showAppearance -> showAppearance = false
                 showLog -> showLog = false
                 showVoice -> showVoice = false
                 showAccess -> showAccess = false
@@ -180,12 +187,24 @@ class MainActivity : ComponentActivity() {
 
         if (showLog) {
             LogScreen(palette = palette, onClose = { showLog = false })
+        } else if (showAppearance) {
+            AppearanceScreen(settings = settings, palette = palette, onClose = { showAppearance = false })
         } else if (showAccess) {
             AccessScreen(
                 system = controller.actions.system,
+                settings = settings,
                 palette = palette,
+                onOpenAppPermissions = { startActivity(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) },
                 onRequestPermission = { anyPermLauncher.launch(it) },
                 onOpenIntent = { runCatching { if (it.action == "android.app.role.action.REQUEST_ROLE") @Suppress("DEPRECATION") startActivityForResult(it, 901) else startActivity(it) } },
+                onSetAssistant = {
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                        val r = controller.actions.setDefaultAssistant()
+                        val m = when (r) { is com.demon.nothingassistant.action.ActionResult.Success -> r.message; is com.demon.nothingassistant.action.ActionResult.Failure -> r.message; else -> "" }
+                        android.widget.Toast.makeText(this@MainActivity, m, android.widget.Toast.LENGTH_LONG).show()
+                        if (!com.demon.nothingassistant.access.NothingAccess.isEnabled(this@MainActivity) || r is com.demon.nothingassistant.action.ActionResult.Success) startActivity(android.content.Intent(this@MainActivity, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                    }
+                },
                 onClose = { showAccess = false }
             )
         } else if (showPersona) {
@@ -258,6 +277,7 @@ class MainActivity : ComponentActivity() {
                 onOpenAi = { showAi = true },
                 onOpenAccess = { showAccess = true },
                 onOpenVoice = { showVoice = true },
+                onOpenAppearance = { showAppearance = true },
                 onOpenLog = { showLog = true },
                 onClose = { showSettings = false }
             )

@@ -43,9 +43,12 @@ private class AccessItem(
 @Composable
 fun AccessScreen(
     system: SystemActions,
+    settings: com.demon.nothingassistant.data.Settings,
     palette: GlyphPalette,
+    onOpenAppPermissions: () -> Unit,
     onRequestPermission: (String) -> Unit,
     onOpenIntent: (android.content.Intent) -> Unit,
+    onSetAssistant: () -> Unit,
     onClose: () -> Unit
 ) {
     val mono = FontFamily.Monospace
@@ -65,12 +68,7 @@ fun AccessScreen(
                 val cur = runCatching { android.provider.Settings.Secure.getString(ctx.contentResolver, "assistant").orEmpty() }.getOrDefault("")
                 cur.contains(pkg) || (android.os.Build.VERSION.SDK_INT >= 29 && runCatching { ctx.getSystemService(android.app.role.RoleManager::class.java).isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT) }.getOrDefault(false))
             },
-            {
-                val rm = if (android.os.Build.VERSION.SDK_INT >= 29) ctx.getSystemService(android.app.role.RoleManager::class.java) else null
-                val ask = if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_ASSISTANT) else null
-                // The phone's own "Set as default?" sheet when it offers one, otherwise the default-assistant page itself.
-                onOpenIntent(ask ?: android.content.Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS))
-            }),
+            { onSetAssistant() }),
         AccessItem("Modify system settings", "Brightness, rotation, screen timeout",
             { system.canWriteSettings() },
             { onOpenIntent(android.content.Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:$pkg"))) }),
@@ -114,7 +112,7 @@ fun AccessScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.bg)
+            .glassBackdrop(palette)
             .systemBarsPadding()
             .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())
@@ -124,7 +122,7 @@ fun AccessScreen(
             Spacer(Modifier.weight(1f))
             Text(
                 "BACK", color = palette.muted, fontFamily = mono, fontSize = 11.sp, letterSpacing = 2.sp,
-                modifier = Modifier.clickable(onClick = onClose).padding(vertical = 8.dp, horizontal = 4.dp)
+                modifier = Modifier.squish(onClick = onClose).padding(vertical = 8.dp, horizontal = 4.dp)
             )
         }
         Spacer(Modifier.height(20.dp))
@@ -145,7 +143,7 @@ fun AccessScreen(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = !ok) { it.grant() }
+                        .squish(enabled = !ok) { it.grant() }
                         .padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -161,6 +159,12 @@ fun AccessScreen(
                 }
             }
         }
+        Spacer(Modifier.height(16.dp))
+        Card(palette) {
+            NavRow(DotIcons.APPS, "App permissions", "Microphone, contacts, notifications in Android's app page", palette, onOpenAppPermissions)
+        }
+        Spacer(Modifier.height(16.dp))
+        AdvancedAccessCard(settings, palette)
         Spacer(Modifier.height(16.dp))
         Text(
             "NOT POSSIBLE WITHOUT ROOT: toggling Wi-Fi, Bluetooth, mobile data or airplane mode directly, " +

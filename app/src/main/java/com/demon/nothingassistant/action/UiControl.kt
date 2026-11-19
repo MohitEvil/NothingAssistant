@@ -291,7 +291,91 @@ class UiControl(context: Context) {
 
     private val searchWords = setOf("search", "search bar", "search box", "search field", "search icon", "search text box", "search input", "address bar", "url bar", "text box", "text field", "input box", "input field", "textbox")
 
-    internal fun isSearchLabel(label: String) = label.lowercase().trim() in searchWords
+    private val searchLike = Regex("^(?:the |a |an |this |that |my )?(?:(?:search|find|type|typing|text|input|address|url|query|enter|write|message|chat|entry)(?: or (?:type|enter|say|paste)(?: (?:a )?(?:url|address|text|something))?)?[ -]?)?(?:bar|box|field|input|icon|button|area|entry|tab|text ?box|text ?field|text ?bar|text ?area)(?: here| on (?:the )?screen)?$", RegexOption.IGNORE_CASE)
+    internal fun isSearchLabel(label: String): Boolean {
+        val l = label.lowercase().trim()
+        return l in searchWords || (searchLike.matches(l) && !l.startsWith("message") && !l.startsWith("chat")) || l == "search"
+    }
+
+    /** Opens Android's default-assistant page and selects Nothing Assistant by itself (needs Accessibility). Falls back to leaving the page open. */
+    suspend fun setDefaultAssistant(): ActionResult = withContext(Dispatchers.Default) {
+        fun isSet() = runCatching { Settings.Secure.getString(app.contentResolver, "assistant").orEmpty().contains(app.packageName) }.getOrDefault(false)
+        if (isSet()) return@withContext ActionResult.Success("Nothing Assistant is already your default assistant.")
+        val i = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!launch(i)) launch(Intent(Settings.ACTION_SETTINGS))
+        val svc = NothingAccess.instance ?: return@withContext ActionResult.Success("I opened the page. Pick Nothing Assistant there. Turn on Accessibility and I'll do it for you next time.")
+        delay(1200)
+        val mine = listOf("Nothing Assistant")
+        repeat(4) {
+            val row = svc.waitFind(mine, 2500)
+            if (row != null) {
+                svc.clickSure(row)
+                delay(500)
+                // "Make Nothing Assistant your default?" dialog
+                svc.waitFind(listOf("OK", "Set", "Yes", "Confirm", "Allow", "Agree"), 1800)?.takeIf { !it.isEditable }?.let { svc.click(it); delay(500) }
+                if (isSet()) return@withContext ActionResult.Success("Done. Nothing Assistant is now your default assistant.")
+            } else {
+                // The first page only shows the current choice: open it.
+                svc.find(listOf("Default digital assistant app", "Digital assistant app", "Assist app", "Default assistant"))?.let { svc.clickSure(it); delay(900) }
+                    ?: Ocr.read(svc)?.firstOrNull { NothingAccess.norm(it.text).contains("digitalassistant") }?.let { l -> svc.tapAt(l.box.exactCenterX(), l.box.exactCenterY()); delay(900) }
+            }
+            if (isSet()) return@withContext ActionResult.Success("Done. Nothing Assistant is now your default assistant.")
+        }
+        if (isSet()) ActionResult.Success("Done. Nothing Assistant is now your default assistant.")
+        else ActionResult.Failure("I opened the page but couldn't select it. Tap Nothing Assistant in the list.")
+    }
+
+    /** Waits for one of [labels] to show as a button (accessibility first, then the pixels) and presses it. */
+    suspend fun pressWhenVisible(labels: List<String>, ms: Long): Boolean {
+        val svc = NothingAccess.instance ?: return false
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            val n = svc.find(labels)?.takeIf { !it.isEditable }
+            if (n != null) { svc.clickSure(n, expectChange = false); return true }
+            delay(450)
+        }
+        val keys = labels.map { NothingAccess.norm(it) }
+        val line = Ocr.read(svc)?.firstOrNull { NothingAccess.norm(it.text) in keys }
+        if (line != null) return svc.tapAt(line.box.exactCenterX(), line.box.exactCenterY())
+        return false
+    }
+
+    /** Gets a text box ready to type a search into, trying every way a screen can offer one. Null only when nothing worked. */
+    suspend fun ensureSearchField(svc: NothingAccess): android.view.accessibility.AccessibilityNodeInfo? {
+        // 1. A search box or a search icon in the accessibility tree.
+        svc.waitSearch(1800)?.let { (node, isField) ->
+            if (isField) { svc.click(node); delay(150); svc.waitEditable(900)?.let { return it } }
+            else {
+                svc.clickSure(node)
+                svc.waitEditable(1800)?.let { return it }
+            }
+        }
+        // 2. Anything labelled like search (text, description, tooltip, id), tapped by its position.
+        val dm = app.resources.displayMetrics
+        val tryNodes = svc.candidates().filter { c ->
+            c.clickable && !c.editable && (c.label + " " + c.alts.joinToString(" ")).lowercase().let { it.contains("search") || it.contains("find") || it.contains("magnif") || it.contains("query") }
+        }.sortedBy { it.hit.centerY() }.take(3)
+        for (c in tryNodes) {
+            svc.tapAt(c.hit.exactCenterX(), c.hit.exactCenterY())
+            svc.waitEditable(1500)?.let { return it }
+        }
+        // 3. Read the pixels: a "Search …" line or the word Search near the top of the screen.
+        val ocr = Ocr.read(svc)
+        val line = ocr?.filter { it.box.centerY() < dm.heightPixels * 0.45 && Regex("^(?:search|find|type|ask)\\b.*|.*\\bsearch\\b.*", RegexOption.IGNORE_CASE).matches(it.text.trim()) }
+            ?.minByOrNull { it.box.top }
+        if (line != null) {
+            svc.tapAt(line.box.exactCenterX(), line.box.exactCenterY())
+            svc.waitEditable(1500)?.let { return it }
+        }
+        // 4. Any text box already on screen.
+        svc.waitEditable(500)?.let { return it }
+        // 5. Last resort: the usual place, top centre, then the top-right icon.
+        for ((fx, fy) in listOf(0.5f to 0.09f, 0.9f to 0.07f)) {
+            svc.tapAt(dm.widthPixels * fx, dm.heightPixels * fy)
+            svc.waitEditable(1200)?.let { return it }
+        }
+        return null
+    }
 
     private var lastTarget = ""
 
@@ -329,6 +413,7 @@ class UiControl(context: Context) {
                 if (act(f)) return@withContext ActionResult.Success(done)
             }
             svc.findSearchTrigger()?.let { if (act(it.first)) return@withContext ActionResult.Success(done) }
+            ensureSearchField(svc)?.let { return@withContext ActionResult.Success("Opened the search box. What should I search for?") }
         }
         var n = svc.waitFind(listOf(target), 900)
         suspend fun byPixels(): ActionResult? {
@@ -413,15 +498,7 @@ class UiControl(context: Context) {
         val svc = NothingAccess.instance ?: return@withContext needAccess("search in apps")
         clearWay(svc)
         AppLog.d("ui", "search '$query' pick=$pick in ${svc.frontPackage()}")
-        val trig = svc.waitSearch(2200) ?: return@withContext ActionResult.Failure("I can't find a search box on this screen.")
-        if (!trig.second) {
-            svc.click(trig.first)
-            delay(220)
-        } else {
-            svc.click(trig.first)
-            delay(120)
-        }
-        val field = svc.waitEditable(1800) ?: return@withContext ActionResult.Failure("I tapped search, but no text box showed up.")
+        val field = ensureSearchField(svc) ?: return@withContext ActionResult.Failure("I tried every way to open a search box here (the screen, its labels, and reading the pixels) but none showed up. Tap the search bar once and say it again.")
         svc.click(field)
         delay(80)
         if (!svc.setText(query)) return@withContext ActionResult.Failure("I couldn't type into the search box.")
@@ -571,9 +648,9 @@ class UiControl(context: Context) {
         }
         if (svc.setText(v)) return@withContext ActionResult.Success("Typed $v.")
         // No text box is open yet: open the search box (or whatever input is on screen) first, then type.
-        svc.findSearchTrigger()?.let { (node, isField) ->
-            if (!isField) { svc.click(node); delay(350) } else { svc.click(node); delay(150) }
-            svc.waitEditable(1800)?.let { if (svc.setText(v)) return@withContext ActionResult.Success("Typed $v.") }
+        ensureSearchField(svc)?.let { f ->
+            svc.click(f); delay(120)
+            if (svc.setText(v)) return@withContext ActionResult.Success("Typed $v.")
         }
         val hintWords = listOf("message", "type", "write", "enter", "reply", "comment", "note", "name", "email", "password", "username", "url", "address", "number", "phone")
         val box = svc.candidates().firstOrNull { c -> (c.editable || c.clickable) && hintWords.any { c.label.lowercase().contains(it) } }

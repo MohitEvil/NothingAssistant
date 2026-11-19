@@ -157,3 +157,8 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **Messages**: "what's my latest SMS", "read my last 3 texts", "texts from Mom" (needs SMS access).
 - **Screenshots**: "delete the screenshot you just took / latest screenshot" (Android asks once to allow the delete, unless Shizuku/root).
 - **Default assistant**: one-tap button in Phone control access.
+
+## Look and feel (latest)
+- Settings now has sections: Voice (with language and speech recognition), AI settings, Appearance, Access and permissions (phone control, app permissions, Shizuku/root).
+- Appearance: theme, Nothing / Liquid glass / Minimal glass, accent colour, dot blob, typing text, animations, battery saver.
+- Dot-matrix icons, squishy press animation, dot blob while it listens/thinks/works, words typed as it speaks, animated dots on status lines.

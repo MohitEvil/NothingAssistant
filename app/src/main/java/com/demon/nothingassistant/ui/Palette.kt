@@ -34,3 +34,11 @@ val LightPalette = GlyphPalette(
     card = Color(0xFFFFFFFF),
     isDark = false
 )
+
+/** Accent colour choices for the Appearance page. */
+val AccentChoices = listOf("red" to Color(0xFFE5232B), "amber" to Color(0xFFFFB000), "mint" to Color(0xFF2DD4A4), "blue" to Color(0xFF4C8DFF), "white" to Color(0xFFEDEDED))
+
+fun GlyphPalette.withAccent(name: String): GlyphPalette {
+    val c = AccentChoices.firstOrNull { it.first == name }?.second ?: return this
+    return if (name == "red") this else copy(red = c)
+}

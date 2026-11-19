@@ -77,7 +77,7 @@ fun AiVoiceScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(palette.bg)
+            .glassBackdrop(palette)
             .systemBarsPadding()
             .padding(horizontal = 24.dp)
             .verticalScroll(rememberScrollState())

@@ -12,7 +12,8 @@ import kotlinx.coroutines.withContext
 class NavActions(
     private val context: Context,
     private val resolveApp: (String) -> String?,
-    private val launch: (Intent) -> Boolean
+    private val launch: (Intent) -> Boolean,
+    private val afterLaunch: (List<String>) -> Unit = {}
 ) {
     private val geo = Geo(context)
 
@@ -91,6 +92,8 @@ class NavActions(
         val modeWord = when (c.mode) { "walking" -> "Walking directions"; "cycling" -> "Cycling directions"; "transit" -> "Transit directions"; else -> "Navigating" }
         return ActionResult.Success("$modeWord to $label$via.") {
             if (!launch(intent)) launch(mapsIntent("geo:0,0?q=" + Uri.encode(c.to)))
+            // If the map opens on a route preview, press Start for you.
+            afterLaunch(listOf("Start", "Start navigation", "Start driving", "Go"))
         }
     }
 
