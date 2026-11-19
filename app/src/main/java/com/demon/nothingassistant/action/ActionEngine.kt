@@ -31,6 +31,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 sealed interface ActionResult {
     /** [launch], when set, still has to run: the caller starts it as the spoken reply begins, so voice and action line up. */
@@ -68,6 +69,8 @@ class ActionEngine(context: Context) {
 
     val system = SystemActions(app)
     private val ui = UiControl(app)
+    private val device by lazy { DeviceActions(app) { priv.shell(it) } }
+    private val bgScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val smart = SmartUi(ui, app)
     private val notify = NotifyActions(app)
     /** Set by the controller so open-ended jobs can ask the user's AI provider. */
@@ -112,13 +115,50 @@ class ActionEngine(context: Context) {
     /** Commands that wait on other apps' screens run here, off the main thread. Everything else is instant. */
     suspend fun runSuspend(cmd: Command): ActionResult {
         val r = runSuspendInner(cmd)
+        runCatching { learnFrom(cmd, r) }
         if (r is ActionResult.Success && cmd is Command.Screen && cmd !is Command.UiRepeat && cmd !is Command.GlobalAction &&
             cmd !is Command.UiFind && cmd !== Command.ReadScreen && cmd !is Command.Chain && cmd !is Command.Wait
         ) lastScreen = cmd
         return r
     }
 
+    /** Keeps the blackboard current: what "it" means next, and what a switch was before (for undo). */
+    private fun learnFrom(cmd: Command, r: ActionResult) {
+        val ok = r is ActionResult.Success
+        Blackboard.record(cmd.describe(), cmd, ok, when (r) { is ActionResult.Success -> r.message; is ActionResult.Failure -> r.message; else -> "" })
+        if (!ok) return
+        when (cmd) {
+            is Command.Toggle -> Blackboard.setSetting(cmd.key, when (cmd.on) { true -> "off"; false -> "on"; null -> "" })
+            is Command.Flashlight -> Blackboard.setSetting("flashlight", when (cmd.on) { true -> "off"; false -> "on"; null -> "" })
+            is Command.GlobalAction -> if (cmd.key == com.demon.nothingassistant.intent.GlobalKey.SCREENSHOT) bgScope.launch { device.rememberNewScreenshot() }
+            else -> {}
+        }
+    }
+
+    private suspend fun summarize(what: String): ActionResult {
+        if (what.startsWith("message") || what.startsWith("sms") || what.startsWith("text")) return device.readSms(5, null, true)
+        val svc = com.demon.nothingassistant.access.NothingAccess.instance ?: return ActionResult.Failure("Turn on Accessibility in Phone control access so I can read the screen.")
+        var text = svc.visibleText(120).joinToString(". ")
+        if (text.length < 80) {
+            val ocr = com.demon.nothingassistant.access.Ocr.read(svc)
+            if (!ocr.isNullOrEmpty()) text = ocr.joinToString(". ") { it.text }
+        }
+        if (text.length < 40) return ActionResult.Failure("There isn't enough text on this screen to summarise.")
+        return ActionResult.Success(com.demon.nothingassistant.ai.Summarizer.summarize(text, 360, 3))
+    }
+
+    private suspend fun undo(): ActionResult {
+        val (key, prev) = Blackboard.lastSetting() ?: return ActionResult.Failure("I don't have anything to undo.")
+        val on: Boolean? = when (prev) { "on" -> true; "off" -> false; else -> null }
+        val cmd: Command = if (key == "flashlight") Command.Flashlight(on) else Command.Toggle(key, on)
+        return runSuspendInner(cmd)
+    }
+
     private suspend fun runSuspendInner(cmd: Command): ActionResult = when (cmd) {
+        is Command.ReadSms -> device.readSms(cmd.count, cmd.from, cmd.summary)
+        Command.DeleteScreenshot -> device.deleteScreenshot()
+        is Command.Summarize -> summarize(cmd.what)
+        Command.Undo -> undo()
         Command.UiRepeat -> lastScreen?.let { runSuspendInner(it) } ?: ActionResult.Failure("I don't have anything to repeat yet.")
         is Command.UiX -> smart.run(cmd)
         is Command.Weather -> Weather.now(cmd.place, cmd.tomorrow)
@@ -211,7 +251,7 @@ class ActionEngine(context: Context) {
     }
 
     /** True for commands that take a moment because they drive another screen. */
-    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Priv || cmd is Command.Task || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.UpdateApp || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Priv || cmd is Command.Task || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.UpdateApp || cmd is Command.ReadSms || cmd === Command.DeleteScreenshot || cmd is Command.Summarize || cmd === Command.Undo || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
         cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
         (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
 
@@ -281,7 +321,7 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain, is Command.Wait, is Command.SharePhoto, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp, is Command.UpdateApp ->
+        is Command.TakePhoto, is Command.Chain, is Command.Wait, is Command.SharePhoto, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp, is Command.UpdateApp, is Command.ReadSms, Command.DeleteScreenshot, is Command.Summarize, Command.Undo ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }

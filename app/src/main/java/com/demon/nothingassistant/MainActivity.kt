@@ -185,7 +185,7 @@ class MainActivity : ComponentActivity() {
                 system = controller.actions.system,
                 palette = palette,
                 onRequestPermission = { anyPermLauncher.launch(it) },
-                onOpenIntent = { runCatching { startActivity(it) } },
+                onOpenIntent = { runCatching { if (it.action == "android.app.role.action.REQUEST_ROLE") @Suppress("DEPRECATION") startActivityForResult(it, 901) else startActivity(it) } },
                 onClose = { showAccess = false }
             )
         } else if (showPersona) {

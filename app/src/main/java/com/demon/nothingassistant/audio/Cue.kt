@@ -110,6 +110,9 @@ object Cue {
         }
     }
 
+    /** Milliseconds of the quiet window still to run. */
+    fun guardLeft(): Long = if (muted.isEmpty()) 0 else (unmuteAt - SystemClock.uptimeMillis()).coerceAtLeast(0)
+
     /** Our own voice is about to speak: restore sound immediately so its first word is never clipped. */
     fun unhush(context: Context) {
         runCatching { release(context, audio(context)) }

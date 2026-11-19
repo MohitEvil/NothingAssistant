@@ -20,7 +20,7 @@ import java.util.Locale
  */
 class Planner(private val context: Context, private val brain: Brain) {
 
-    class Plan(val command: Command, val confidence: Double, val source: String)
+    class Plan(val command: Command, val confidence: Double, val source: String, val raw: org.json.JSONArray? = null)
 
     /** 1. Needle 3: instant and offline. Null when it isn't in this build or isn't sure. */
     suspend fun needle(text: String): Plan? {
@@ -30,7 +30,7 @@ class Planner(private val context: Context, private val brain: Brain) {
         val cmd = Tools.toPlan(r.optJSONArray("function_calls"))
         AppLog.d("needle", "'${text.take(50)}' -> ${cmd?.javaClass?.simpleName} confidence $conf")
         if (cmd == null || conf < 0.45) return null
-        return Plan(cmd, conf, "needle")
+        return Plan(cmd, conf, "needle", r.optJSONArray("function_calls"))
     }
 
     private fun screenContext(): String {
@@ -51,11 +51,12 @@ class Planner(private val context: Context, private val brain: Brain) {
             "to install or update an app use install_app (one call); to tap something visible use tap_on_screen with its exact on-screen label; " +
             "use the conversation so far to resolve words like it, that, him, there; " +
             "if the user is only chatting or asking a question to be answered, reply {\"calls\":[]}. Never invent tools.\n" +
-            "Now: $now.\n${screenContext()}\nTools:\n" + Tools.promptList()
-        val reply = brain.ask(history, text, system).getOrNull() ?: return null
+            "Now: $now.\n${screenContext()}\nPhone state: ${com.demon.nothingassistant.action.Blackboard.header()}\nTools:\n" + Tools.promptList()
+        val reply = brain.ask(com.demon.nothingassistant.ai.Summarizer.compactHistory(history), text, system).getOrNull() ?: return null
         val json = reply.substringAfter('{', "").let { if (it.isEmpty()) null else "{" + it.substringBeforeLast('}') + "}" } ?: return null
-        val cmd = runCatching { Tools.toPlan(JSONObject(json).optJSONArray("calls")) }.getOrNull() ?: return null
+        val rawCalls = runCatching { JSONObject(json).optJSONArray("calls") }.getOrNull()
+        val cmd = runCatching { Tools.toPlan(rawCalls) }.getOrNull() ?: return null
         AppLog.d("cloudplan", "'${text.take(50)}' -> ${cmd.javaClass.simpleName}")
-        return Plan(cmd, 0.7, "cloud")
+        return Plan(cmd, 0.7, "cloud", rawCalls)
     }
 }

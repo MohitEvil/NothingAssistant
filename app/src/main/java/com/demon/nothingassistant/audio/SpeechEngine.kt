@@ -60,7 +60,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() { Cue.hushThenRelease(context, 800) }
+            override fun onEndOfSpeech() { Cue.hushThenRelease(context, 1500) }
             override fun onEvent(eventType: Int, params: Bundle?) {}
 
             override fun onRmsChanged(rmsdB: Float) {
@@ -75,14 +75,14 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
 
             override fun onResults(results: Bundle?) {
                 if (!live()) return
-                Cue.hushThenRelease(context, 800)
+                Cue.hushThenRelease(context, 1500)
                 val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                 alternatives = all.drop(1)
                 listener.onFinal(all.firstOrNull().orEmpty())
             }
 
             override fun onError(error: Int) {
-                if (live()) { Cue.hushThenRelease(context, 800); listener.onError(error) }
+                if (live()) { Cue.hushThenRelease(context, 1500); listener.onError(error) }
             }
         })
 
@@ -100,21 +100,21 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
 
     /** Stop capturing and deliver whatever was heard so far. */
     fun stopListening() {
-        Cue.hushThenRelease(context, 900)
+        Cue.hushThenRelease(context, 1500)
         recognizer?.stopListening()
     }
 
     /** Stop listening and ignore anything still on its way. The recognizer is kept for the next turn. */
     fun cancel() {
         generation++
-        Cue.hushThenRelease(context, 900)
+        Cue.hushThenRelease(context, 1500)
         recognizer?.let { runCatching { it.cancel() } }
     }
 
     /** Tear the recognizer down completely (screen closed, or the service dropped). */
     fun release() {
         generation++
-        Cue.hushThenRelease(context, 900)
+        Cue.hushThenRelease(context, 1500)
         recognizer?.let {
             runCatching { it.cancel() }
             runCatching { it.destroy() }

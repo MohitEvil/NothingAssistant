@@ -64,6 +64,7 @@ object IntentEngine {
         if (NotifyState.active()) HelperPhrases.parse(s, l)?.let { return it }
 
         WaitPhrases.parse(s)?.let { return it }
+        DevicePhrases.parse(s)?.let { return it }
         PrivPhrases.parse(s)?.let { return it }
         MacroPhrases.parse(s)?.let { return it }
 

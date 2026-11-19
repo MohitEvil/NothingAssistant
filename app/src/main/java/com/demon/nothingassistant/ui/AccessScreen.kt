@@ -60,6 +60,17 @@ fun AccessScreen(
 
     val pkg = ctx.packageName
     val items = listOf(
+        AccessItem("Default assistant app", "Make Nothing Assistant open from the power button or corner swipe",
+            {
+                val cur = runCatching { android.provider.Settings.Secure.getString(ctx.contentResolver, "assistant").orEmpty() }.getOrDefault("")
+                cur.contains(pkg) || (android.os.Build.VERSION.SDK_INT >= 29 && runCatching { ctx.getSystemService(android.app.role.RoleManager::class.java).isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT) }.getOrDefault(false))
+            },
+            {
+                val rm = if (android.os.Build.VERSION.SDK_INT >= 29) ctx.getSystemService(android.app.role.RoleManager::class.java) else null
+                val ask = if (rm != null && rm.isRoleAvailable(android.app.role.RoleManager.ROLE_ASSISTANT)) rm.createRequestRoleIntent(android.app.role.RoleManager.ROLE_ASSISTANT) else null
+                // The phone's own "Set as default?" sheet when it offers one, otherwise the default-assistant page itself.
+                onOpenIntent(ask ?: android.content.Intent(android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS))
+            }),
         AccessItem("Modify system settings", "Brightness, rotation, screen timeout",
             { system.canWriteSettings() },
             { onOpenIntent(android.content.Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:$pkg"))) }),
@@ -82,9 +93,11 @@ fun AccessScreen(
             { onOpenIntent(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }),
         AccessItem("Contacts", "Call and message by name",
             { system.has(Manifest.permission.READ_CONTACTS) }, { onRequestPermission(Manifest.permission.READ_CONTACTS) }),
+        AccessItem("Text messages (SMS)", "Read your latest messages aloud",
+            { system.has(Manifest.permission.READ_SMS) }, { onRequestPermission(Manifest.permission.READ_SMS) }),
         AccessItem("Phone", "Place calls straight away instead of only opening the dialer",
             { system.has(Manifest.permission.CALL_PHONE) }, { onRequestPermission(Manifest.permission.CALL_PHONE) }),
-        AccessItem("Photos", "Send your latest picture to someone",
+        AccessItem("Photos", "Send or delete your latest picture or screenshot",
             { system.has(if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE) },
             { onRequestPermission(if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE) }),
         AccessItem("Calendar", "“What's on my calendar today?”",

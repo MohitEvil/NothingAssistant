@@ -410,6 +410,26 @@ sealed class Command {
         override fun describe() = "Reading the screen…"
     }
 
+    /** "What's my latest message", "read my last 3 texts (from mom)": reads the SMS inbox. */
+    data class ReadSms(val count: Int = 1, val from: String? = null, val summary: Boolean = false) : Command() {
+        override fun describe() = "Reading your messages…"
+    }
+
+    /** "Delete the screenshot you just took", "delete my latest screenshot", "delete it" after a screenshot. */
+    data object DeleteScreenshot : Command() {
+        override fun describe() = "Deleting the screenshot…"
+    }
+
+    /** "Summarize this screen / page / my notifications". */
+    data class Summarize(val what: String) : Command() {
+        override fun describe() = "Summarising…"
+    }
+
+    /** "Undo that", "turn it back off": puts back what the last switch was before. */
+    data object Undo : Command() {
+        override fun describe() = "Putting it back…"
+    }
+
     data class PlayMusic(val query: String, val app: String?) : Command() {
         override fun describe() = "Finding $query…"
     }

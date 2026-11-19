@@ -186,7 +186,14 @@ object WebInfo {
         }
         val best = pool.maxByOrNull { it.score } ?: return@withContext null
         if (best.score < 0.45) return@withContext null
-        val out = shorten(best.text)
+        // A real summary, not one raw snippet: the best sentence plus one more fact from a different source,
+        // chosen to add something new (and to answer the question), then trimmed to what is worth saying aloud.
+        val bestWords = com.demon.nothingassistant.ai.Summarizer.words(best.text).toSet()
+        val extra = pool.filter { it !== best && it.score >= maxOf(0.55, best.score * 0.75) }
+            .filter { c -> val w = com.demon.nothingassistant.ai.Summarizer.words(c.text).toSet(); w.isNotEmpty() && w.count { it in bestWords }.toDouble() / minOf(w.size, bestWords.size).coerceAtLeast(1) < 0.5 }
+            .maxByOrNull { it.score }
+        var out = shorten(best.text)
+        if (extra != null && out.length < 230) out = com.demon.nothingassistant.ai.Summarizer.summarize(out + " " + shorten(extra.text), 380, 3, q)
         val at = wikiList.indexOf(best.text)
         if (at >= 0) { lastSentences = wikiList; lastIdx = at + maxOf(1, sentences(out).size) } else { lastSentences = emptyList(); lastIdx = 0 }
         out

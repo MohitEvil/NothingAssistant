@@ -90,6 +90,12 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
     override fun speak(raw: String, onDone: () -> Unit) = speak(raw, {}, onDone)
 
     override fun speak(raw: String, onStart: () -> Unit, onDone: () -> Unit) {
+        // Google's closing "ding" can land just after the result: hold our first word back (at most 0.7 s) until the quiet window ends.
+        val wait = Cue.guardLeft().coerceAtMost(700)
+        if (wait > 80) main.postDelayed({ speakNow(raw, onStart, onDone) }, wait) else speakNow(raw, onStart, onDone)
+    }
+
+    private fun speakNow(raw: String, onStart: () -> Unit, onDone: () -> Unit) {
         Cue.unhush(context)
         if (cloud.configured()) {
             system.stop()

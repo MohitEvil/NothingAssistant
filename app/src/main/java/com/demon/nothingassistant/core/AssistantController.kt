@@ -408,6 +408,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private val chatty = Regex("^(?:hi|hello|hey|yo|thanks|thank you|good (?:morning|night|evening|afternoon)|how are you|how r u|who are you|what'?s your name|tell me a joke|i love you|i'?m (?:sad|bored|tired)|are you there|nice|great|cool|awesome|lol)\\b", RegexOption.IGNORE_CASE)
     private val forgetChat = Regex("^(?:clear|forget|delete|erase|reset)\\s+(?:our |the |my |all )?(?:chat |conversation |assistant )?(?:history|conversation|chat)$", RegexOption.IGNORE_CASE)
 
+    /** The sentence and plan from Needle or the cloud, kept until it is known whether the plan worked. */
+    @Volatile private var pendingLearn: Pair<String, org.json.JSONArray?>? = null
+    @Volatile private var replayPattern: String? = null
+
     private fun stepCount(c: Command): Int = if (c is Command.Chain) c.steps.size else 1
 
     /**
@@ -425,6 +429,15 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private suspend fun route(text: String, grammar: Command): Command? {
         val known = grammar !is Command.Unknown && grammar !is Command.Question
         if (chatty.containsMatchIn(text.trim()) && !known) return null
+        pendingLearn = null
+        replayPattern = null
+        // A plan that worked before for this very sentence: replay it, offline, with no model.
+        if (!known || grammar is Command.Chain) {
+            com.demon.nothingassistant.agent.Skills.find(text)?.let { (pat, calls) ->
+                val c = runCatching { com.demon.nothingassistant.agent.Skills.toCommand(calls) }.getOrNull()
+                if (c != null) { replayPattern = pat; AppLog.d("route", "skill"); return c }
+            }
+        }
         // Tier 1 and 2
         val vagueOpen = grammar is Command.OpenApp && (grammar.name.trim().split(Regex("\\s+")).size >= 3 || grammar.name.trim().startsWith("my ", true))
         if (known && grammar !is Command.Chain && grammar !is Command.Task && !vagueOpen) { AppLog.d("route", "tier1/2 ${grammar.javaClass.simpleName}"); return grammar }
@@ -432,14 +445,14 @@ class AssistantController(private val context: Context, val settings: Settings) 
         val n = runCatching { planner.needle(text) }.getOrNull()
         if (n != null) {
             val better = !known || n.confidence >= 0.8 || stepCount(n.command) > stepCount(grammar)
-            if (better) { AppLog.d("route", "needle"); return n.command }
+            if (better) { AppLog.d("route", "needle"); pendingLearn = text to n.raw; return n.command }
         }
         // then the cloud AI, only when the grammar didn't fully understand, or the request is long or has several steps
         val long = text.trim().split(Regex("\\s+")).size >= 9
         if (brain.configured() && (!known || grammar is Command.Chain || long)) {
             transition(AssistantState.THINKING, "Planning…", text)
             val c = runCatching { planner.cloud(text, history.recent()) }.getOrNull()
-            if (c != null) { AppLog.d("route", "cloud"); return c.command }
+            if (c != null) { AppLog.d("route", "cloud"); pendingLearn = text to c.raw; return c.command }
         }
         if (known) { AppLog.d("route", "grammar"); return grammar }
         return null
@@ -451,6 +464,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
         lastActive = SystemClock.uptimeMillis()
         workJob = scope.launch {
             transition(AssistantState.THINKING, "Understanding your request…", text)
+            if (Regex("^(?:forget|clear|reset|delete) (?:what you(?:'ve| have) learned|(?:your |the |all )?(?:learned )?skills)$", RegexOption.IGNORE_CASE).matches(text.trim())) {
+                com.demon.nothingassistant.agent.Skills.clear()
+                success("Done. I've forgotten the shortcuts I learned.", text)
+                return@launch
+            }
             if (forgetChat.matches(text.trim())) {
                 history.clear()
                 success("Done. I've cleared our chat history.", text)
@@ -474,11 +492,19 @@ class AssistantController(private val context: Context, val settings: Settings) 
             is ActionResult.Success -> {
                 val launch = result.launch
                 history.addPair(text, result.message.ifBlank { "Done." }, "action")
+                pendingLearn?.let { (t, raw) -> if (t == text) com.demon.nothingassistant.agent.Skills.learn(t, raw) }
+                replayPattern?.let { com.demon.nothingassistant.agent.Skills.succeeded(it) }
+                pendingLearn = null; replayPattern = null
                 if (startsPlayback(cmd)) { playAndClose(launch); return }
                 if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
                 else successLaunching(result.message, text, launch)
             }
-            is ActionResult.Failure -> { history.addPair(text, result.message, "action"); fail(result.message, text, session = true) }
+            is ActionResult.Failure -> {
+                history.addPair(text, result.message, "action")
+                replayPattern?.let { com.demon.nothingassistant.agent.Skills.failed(it) }
+                pendingLearn = null; replayPattern = null
+                fail(result.message, text, session = true)
+            }
             is ActionResult.Confirm -> askConfirm(
                 PendingConfirm(
                     title = result.title,
@@ -540,6 +566,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
         if (com.demon.nothingassistant.action.WebInfo.isMore(t)) {
             com.demon.nothingassistant.action.WebInfo.more()?.let { remember(text, it); respond(text, it); return }
         }
+        // "Did it work?", "what did you just do?": answered from the action log.
+        com.demon.nothingassistant.action.Blackboard.status(t)?.let { remember(text, it); respond(text, it); return }
         // Questions about the phone and the assistant, chit-chat, moods, jokes and maths are answered offline, instantly.
         // The AI is only for real knowledge questions, and only when it's switched on and set up.
         val small = com.demon.nothingassistant.ai.Knowledge.answer(text, brain.configured())
@@ -551,7 +579,12 @@ class AssistantController(private val context: Context, val settings: Settings) 
         }
         if (brain.configured()) {
             transition(AssistantState.THINKING, "Thinking…", text)
-            val reply = brain.ask(history.recent(), text).getOrNull()
+            // Fresh facts from the web, boiled down to a few sentences, so the AI answers from them instead of guessing.
+            val factual = question || Regex("^(?:who|what|when|where|which|how (?:many|much|old|far|tall|long)|is|are|does|did|was|were)\\b", RegexOption.IGNORE_CASE).containsMatchIn(t)
+            val ref = if (factual && t.split(Regex("\\s+")).size >= 3)
+                runCatching { kotlinx.coroutines.withTimeoutOrNull(3500) { com.demon.nothingassistant.action.WebInfo.answer(text, history.lastChatQuestion()) } }.getOrNull() else null
+            val sys = if (ref != null) "You are a voice assistant. Answer in at most two short sentences, no markdown. Use this web summary if it helps and say nothing about it being a summary: $ref" else null
+            val reply = brain.ask(com.demon.nothingassistant.ai.Summarizer.compactHistory(history.recent()), text, sys).getOrNull()
             if (reply != null) {
                 remember(text, reply)
                 respond(text, reply)

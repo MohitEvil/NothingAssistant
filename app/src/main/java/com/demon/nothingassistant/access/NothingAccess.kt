@@ -139,11 +139,7 @@ class NothingAccess : AccessibilityService() {
         for (forward in listOf(true, false)) {
             var stuck = 0
             repeat(maxScrolls) {
-                val sc = findScrollable() ?: return null
-                val moved = sc.performAction(
-                    if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-                )
-                delay(if (moved) 110 else 40)
+                val moved = scrollStep(forward)
                 find(labels)?.let { return it }
                 if (!moved && ++stuck >= 1) return@repeat
             }
@@ -168,9 +164,18 @@ class NothingAccess : AccessibilityService() {
         return best
     }
 
-    fun scroll(forward: Boolean): Boolean = findScrollable()?.performAction(
-        if (forward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-    ) ?: false
+    /** One scroll step, checked: uses the page's own scroll action, then a drag inside the scroll area. False only when the page really did not move. */
+    suspend fun scrollStep(forward: Boolean): Boolean {
+        val dir = if (forward) "down" else "up"
+        val before = signature()
+        if (scrollDirNode(dir)) {
+            delay(260)
+            if (signature() != before) return true
+        }
+        swipe(if (forward) "up" else "down")
+        delay(420)
+        return signature() != before
+    }
 
     /** Text currently visible on screen, top to bottom, without duplicates. */
     fun visibleText(limit: Int = 40): List<String> {
@@ -448,12 +453,11 @@ class NothingAccess : AccessibilityService() {
         return f.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
     }
 
-    fun scrollEdge(top: Boolean): Boolean {
+    suspend fun scrollEdge(top: Boolean): Boolean {
         var any = false
-        repeat(25) {
-            val moved = scroll(!top)
-            if (!moved) return any
-            any = true
+        var stuck = 0
+        repeat(30) {
+            if (scrollStep(!top)) { any = true; stuck = 0 } else { stuck++; if (stuck >= 2) return any }
         }
         return any
     }

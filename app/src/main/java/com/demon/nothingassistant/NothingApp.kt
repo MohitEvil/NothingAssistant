@@ -14,6 +14,8 @@ class NothingApp : Application() {
         super.onCreate()
         com.demon.nothingassistant.debug.AppLog.init(this)
         com.demon.nothingassistant.action.Subject.init(this)
+        com.demon.nothingassistant.action.Blackboard.init(this)
+        com.demon.nothingassistant.agent.Skills.init(this)
         com.demon.nothingassistant.audio.Cue.recover(this)
         settings = Settings(this)
         com.demon.nothingassistant.priv.Priv.preference = { settings.privMode }

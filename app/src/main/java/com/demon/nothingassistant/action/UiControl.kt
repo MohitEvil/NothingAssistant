@@ -330,18 +330,24 @@ class UiControl(context: Context) {
             }
             svc.findSearchTrigger()?.let { if (act(it.first)) return@withContext ActionResult.Success(done) }
         }
-        val n = svc.waitFind(listOf(target), 1000) ?: svc.scrollToFind(listOf(target), 6)
+        var n = svc.waitFind(listOf(target), 900)
+        suspend fun byPixels(): ActionResult? {
+            val line = Ocr.read(svc)?.firstOrNull { NothingAccess.norm(it.text).contains(key) }
+            if (line != null) {
+                val x = line.box.exactCenterX()
+                val y = line.box.exactCenterY()
+                val ok = when (kind) { TapKind.TAP -> svc.tapAt(x, y); TapKind.LONG -> svc.holdAt(x, y, 800); TapKind.DOUBLE -> svc.doubleTapAt(x, y) }
+                if (ok) return ActionResult.Success(done)
+            }
+            return null
+        }
+        // Not in the accessibility tree: read what is drawn BEFORE scrolling anywhere, it may already be on screen.
+        if (n == null) byPixels()?.let { return@withContext it }
+        if (n == null) n = svc.scrollToFind(listOf(target), 8)
         if (n != null) {
             return@withContext if (act(n)) ActionResult.Success(done) else ActionResult.Failure("I couldn't ${if (kind == TapKind.TAP) "tap" else "press"} $target.")
         }
-        // Nothing in the accessibility tree: read the pixels and act where the words are.
-        val line = Ocr.read(svc)?.firstOrNull { NothingAccess.norm(it.text).contains(key) }
-        if (line != null) {
-            val x = line.box.exactCenterX()
-            val y = line.box.exactCenterY()
-            val ok = when (kind) { TapKind.TAP -> svc.tapAt(x, y); TapKind.LONG -> svc.holdAt(x, y, 800); TapKind.DOUBLE -> svc.doubleTapAt(x, y) }
-            if (ok) return@withContext ActionResult.Success(done)
-        }
+        byPixels()?.let { return@withContext it }
         ActionResult.Failure("I can't see “$target” on this screen.")
     }
 
@@ -582,8 +588,8 @@ class UiControl(context: Context) {
     suspend fun scroll(forward: Boolean): ActionResult = withContext(Dispatchers.Default) {
         val svc = NothingAccess.instance ?: return@withContext needAccess("scroll")
         clearWay(svc)
-        if (svc.scroll(forward)) ActionResult.Success(if (forward) "Scrolled down." else "Scrolled up.")
-        else ActionResult.Failure("Nothing to scroll here.")
+        if (svc.scrollStep(forward)) ActionResult.Success(if (forward) "Scrolled down." else "Scrolled up.")
+        else ActionResult.Failure("This page doesn't move any further.")
     }
 
     /** "What's on screen?": the app, the main text, what can be tapped, and any text boxes. Falls back to reading pixels. */
@@ -596,7 +602,7 @@ class UiControl(context: Context) {
         if (sc.texts.isNotEmpty()) parts.add("I can see: " + sc.texts.take(8).joinToString(". ") { it.take(80) } + ".")
         if (sc.buttons.isNotEmpty()) parts.add("You can tap: " + sc.buttons.take(8).joinToString(", ") + ".")
         if (sc.fields.isNotEmpty()) parts.add("There's a text box" + (if (sc.fields.size > 1) "es" else "") + ".")
-        if (sc.texts.size + sc.buttons.size < 2) {
+        if (sc.texts.size + sc.buttons.size < 5) {
             val ocr = Ocr.read(svc)
             if (!ocr.isNullOrEmpty()) {
                 parts.add("Reading the pixels: " + ocr.take(10).joinToString(". ") { it.text.take(80) } + ".")

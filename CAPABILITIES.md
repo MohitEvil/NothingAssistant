@@ -149,3 +149,11 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Follow-ups: "what about X", "tell me more", "say that again", "what did I ask" use the saved chat history.
 - The recogniser's start/stop dings are muted for the whole listening turn and restored afterwards.
 - Matcher: Jaro-Winkler, Levenshtein, a synonym table and a small trigram embedding stand in for a neural sentence embedder (no extra native library, so it can't clash with the voice engine).
+
+## Smarter assistant (latest)
+- **Summaries**: offline summariser used for web answers (AI chat off), "summarise this screen / my messages", and to squeeze old chat turns for the AI and Needle.
+- **Memory**: a blackboard of what just happened (last screenshot, last app, last switch and its previous value) so "delete it", "undo that", "turn it back off", "did it work?" work without a model.
+- **Self-learning skills**: plans from Needle 3 or your AI that worked are saved and replayed offline next time ("forget skills" clears them).
+- **Messages**: "what's my latest SMS", "read my last 3 texts", "texts from Mom" (needs SMS access).
+- **Screenshots**: "delete the screenshot you just took / latest screenshot" (Android asks once to allow the delete, unless Shizuku/root).
+- **Default assistant**: one-tap button in Phone control access.
