@@ -238,6 +238,7 @@ internal fun Chip(text: String, selected: Boolean, palette: GlyphPalette, onClic
         modifier = Modifier
             .then(
                 if (selected) Modifier.background(palette.fg, shape)
+                else if (LocalUiStyle.current.glass == 1) Modifier.glassFill(palette, shape)
                 else Modifier.border(BorderStroke(1.dp, palette.muted), shape)
             )
             .squish(onClick = onClick)

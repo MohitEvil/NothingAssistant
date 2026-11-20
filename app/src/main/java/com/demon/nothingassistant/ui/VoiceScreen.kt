@@ -21,8 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.demon.nothingassistant.audio.AsrModel
-import com.demon.nothingassistant.audio.SherpaAsr
+import com.demon.nothingassistant.audio.VoskLang
+import com.demon.nothingassistant.audio.VoskAsr
 import androidx.compose.ui.platform.LocalContext
 import com.demon.nothingassistant.audio.InstallPhase
 import com.demon.nothingassistant.audio.InstallState
@@ -95,50 +95,43 @@ fun VoiceScreen(
             ToggleRow("Prefer offline speech", "Uses the on-device model when installed", settings.preferOffline, palette) { settings.setPreferOffline(it) }
         }
 
-        val asr = SherpaAsr.get(LocalContext.current)
+        val vosk = VoskAsr.get(LocalContext.current)
         Spacer(Modifier.height(20.dp))
         SectionLabel("RECOGNISER", palette)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf("AUTO" to "auto", "GOOGLE / SYSTEM" to "system", "ON-DEVICE LIVE" to "live", "ON-DEVICE ACCURATE" to "accurate", "TWO-PASS" to "twopass").forEach { (name, id) ->
-                Chip(name, settings.asrEngine == id, palette) { settings.setAsrEngine(id) }
+            listOf("AUTO" to "auto", "GOOGLE / SYSTEM" to "system", "ON-DEVICE (OFFLINE)" to "device").forEach { (name, id) ->
+                Chip(name, (if (settings.asrEngine in listOf("live", "accurate", "twopass")) "device" else settings.asrEngine) == id, palette) { settings.setAsrEngine(id) }
             }
         }
         Spacer(Modifier.height(8.dp))
         Text(
             when (settings.asrEngine) {
                 "system" -> "Uses the speech service of your ROM (Google). Needs internet unless offline speech is installed."
-                "live" -> "My own recogniser. Words appear while you speak. Works with no internet and no Google."
-                "accurate" -> "My own recogniser. Waits until you finish, then writes the whole sentence more accurately."
-                "twopass" -> "Live words while you speak, then a second accurate pass for the final text. Best result, uses the most memory."
-                else -> "Uses Google speech when your ROM has it, otherwise my on-device recogniser. Recommended."
+                "device" -> "My own offline recogniser (Vosk). Works with no internet and no Google. Download the language you speak below."
+                else -> "Uses Google speech when your ROM has it, otherwise my offline recogniser. Recommended."
             },
             color = palette.muted, fontSize = 12.sp
         )
-        if (!asr.libraryPresent) {
-            Spacer(Modifier.height(8.dp))
-            Text("The on-device engine isn't part of this build, so only the system recogniser is used.", color = palette.red, fontSize = 12.sp)
-        } else {
-            AsrModel.values().forEach { m ->
-                val st = asr.states[m.id] ?: InstallState(InstallPhase.NOT_INSTALLED)
-                Spacer(Modifier.height(10.dp))
-                Card(palette) {
-                    Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(m.title, color = palette.fg, fontFamily = mono, fontSize = 12.sp, letterSpacing = 1.sp)
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                when (st.phase) { InstallPhase.INSTALLED -> "INSTALLED"; InstallPhase.DOWNLOADING -> "${(st.progress * 100).toInt()}%"; InstallPhase.INSTALLING -> "UNPACKING…"; else -> m.size.uppercase() },
-                                color = if (st.phase == InstallPhase.INSTALLED) palette.red else palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp
-                            )
-                        }
-                        if (st.phase == InstallPhase.DOWNLOADING) { Spacer(Modifier.height(8.dp)); ProgressBar(st.progress, palette) }
-                        if (st.phase == InstallPhase.FAILED) { Spacer(Modifier.height(6.dp)); Text(st.message, color = palette.red, fontSize = 12.sp) }
-                        Spacer(Modifier.height(10.dp))
-                        when (st.phase) {
-                            InstallPhase.INSTALLED -> PillButton("DELETE", filled = false, palette = palette, onClick = { asr.delete(m) }, modifier = Modifier.fillMaxWidth())
-                            InstallPhase.DOWNLOADING, InstallPhase.INSTALLING -> Unit
-                            else -> PillButton(if (st.phase == InstallPhase.FAILED) "TRY AGAIN" else "DOWNLOAD (${m.size.uppercase()})", filled = true, palette = palette, onClick = { asr.download(m) }, modifier = Modifier.fillMaxWidth())
-                        }
+        VoskLang.values().forEach { m ->
+            val st = vosk.states[m.id] ?: InstallState(InstallPhase.NOT_INSTALLED)
+            Spacer(Modifier.height(10.dp))
+            Card(palette) {
+                Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(m.title, color = palette.fg, fontFamily = mono, fontSize = 12.sp, letterSpacing = 1.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            when (st.phase) { InstallPhase.INSTALLED -> "INSTALLED"; InstallPhase.DOWNLOADING -> "${(st.progress * 100).toInt()}%"; InstallPhase.INSTALLING -> "UNPACKING…"; else -> m.size.uppercase() },
+                            color = if (st.phase == InstallPhase.INSTALLED) palette.red else palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp
+                        )
+                    }
+                    if (st.phase == InstallPhase.DOWNLOADING) { Spacer(Modifier.height(8.dp)); ProgressBar(st.progress, palette) }
+                    if (st.phase == InstallPhase.FAILED) { Spacer(Modifier.height(6.dp)); Text(st.message, color = palette.red, fontSize = 12.sp) }
+                    Spacer(Modifier.height(10.dp))
+                    when (st.phase) {
+                        InstallPhase.INSTALLED -> PillButton("DELETE", filled = false, palette = palette, onClick = { vosk.delete(m) }, modifier = Modifier.fillMaxWidth())
+                        InstallPhase.DOWNLOADING, InstallPhase.INSTALLING -> Unit
+                        else -> PillButton(if (st.phase == InstallPhase.FAILED) "TRY AGAIN" else "DOWNLOAD (${m.size.uppercase()})", filled = true, palette = palette, onClick = { vosk.download(m) }, modifier = Modifier.fillMaxWidth())
                     }
                 }
             }

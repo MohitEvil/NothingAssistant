@@ -49,44 +49,27 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
         return android.content.ComponentName(pick.packageName, pick.name)
     }
 
-    private val sherpa get() = SherpaAsr.get(context)
-    private var usingSherpa = false
+    private val vosk get() = VoskAsr.get(context)
+    private var usingDevice = false
 
-    /** Which recogniser a turn uses: "auto" (Google/system if the ROM has one, else on-device), "system", "live", "accurate" or "twopass". */
-    private fun pickSherpa(choice: String, systemOk: Boolean): SherpaAsr.Mode? {
-        val sh = sherpa
-        return when (choice) {
-            "system" -> null
-            "live" -> if (sh.ready(SherpaAsr.Mode.LIVE)) SherpaAsr.Mode.LIVE else null
-            "accurate" -> if (sh.ready(SherpaAsr.Mode.ACCURATE)) SherpaAsr.Mode.ACCURATE else null
-            "twopass" -> when {
-                sh.ready(SherpaAsr.Mode.TWOPASS) && sh.installed(AsrModel.ACCURATE) -> SherpaAsr.Mode.TWOPASS
-                sh.ready(SherpaAsr.Mode.LIVE) -> SherpaAsr.Mode.LIVE
-                else -> null
-            }
-            else -> if (systemOk) null else sh.bestAvailable()
-        }
-    }
-
+    /** Which recogniser a turn uses: "auto" (Google/system if the ROM has one, else on-device), "system" or "device". */
     fun start(languageTag: String, preferOffline: Boolean, choice: String = "auto") {
         val systemOk = SpeechRecognizer.isRecognitionAvailable(context) || realService() != null
-        val mode = pickSherpa(choice, systemOk)
-        if (mode != null) {
-            usingSherpa = true
-            generation++
-            runCatching { recognizer?.cancel() }
-            sherpa.start(mode, listener)
-            return
-        }
-        usingSherpa = false
-        if (!systemOk) {
-            if (choice != "system" && sherpa.libraryPresent) {
-                if (choice == "auto" || choice == "live" || choice == "twopass") sherpa.download(AsrModel.LIVE)
-                if (choice == "accurate") sherpa.download(AsrModel.ACCURATE)
+        val wantDevice = choice == "device" || choice == "live" || choice == "accurate" || choice == "twopass" || (choice == "auto" && !systemOk)
+        if (wantDevice) {
+            if (vosk.anyInstalled()) {
+                usingDevice = true
+                generation++
+                runCatching { recognizer?.cancel() }
+                vosk.start(languageTag, listener)
+                return
             }
-            listener.onError(if (choice == "system" || !sherpa.libraryPresent) ERROR_UNAVAILABLE else ERROR_NOMODEL)
-            return
+            // No model yet: fetch the one for the chosen language, then ask to try again.
+            vosk.download(VoskLang.forTag(languageTag))
+            if (!systemOk || choice != "auto") { usingDevice = false; listener.onError(ERROR_NOMODEL); return }
         }
+        usingDevice = false
+        if (!systemOk) { listener.onError(ERROR_UNAVAILABLE); return }
         val gen = ++generation
         Cue.hushSystemBeep(context, 20_000) // muted for the whole listening turn, so neither the start nor the stop ding is heard
         val r = recognizer ?: (realService()?.let { SpeechRecognizer.createSpeechRecognizer(context, it) } ?: SpeechRecognizer.createSpeechRecognizer(context)).also { recognizer = it }
@@ -137,7 +120,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
 
     /** Stop capturing and deliver whatever was heard so far. */
     fun stopListening() {
-        if (usingSherpa) { sherpa.finish(); return }
+        if (usingDevice) { vosk.finish(); return }
         Cue.hushThenRelease(context, 1500)
         recognizer?.stopListening()
     }
@@ -145,7 +128,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     /** Stop listening and ignore anything still on its way. The recognizer is kept for the next turn. */
     fun cancel() {
         generation++
-        if (usingSherpa) { sherpa.cancel(); return }
+        if (usingDevice) { vosk.cancel(); return }
         Cue.hushThenRelease(context, 1500)
         recognizer?.let { runCatching { it.cancel() } }
     }
@@ -153,7 +136,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     /** Tear the recognizer down completely (screen closed, or the service dropped). */
     fun release() {
         generation++
-        if (usingSherpa) sherpa.cancel()
+        if (usingDevice) vosk.cancel()
         Cue.hushThenRelease(context, 1500)
         recognizer?.let {
             runCatching { it.cancel() }

@@ -192,3 +192,9 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Default look for new installs: Dark, Nothing style, Red accent.
 - Liquid Glass reworked to feel like iOS: clear body, bright edge on two corners, inner glow, floating shadow, colour blobs drifting behind.
 - Speech: on-device decoder kept at full precision, quiet-mic gain, logging of what was heard. Marked beta.
+
+## Round 3
+- Blob: back to the original animation.
+- Speech: the sherpa recogniser is gone. Vosk offline recognition replaces it (English India/US, Hindi; about 40 MB each, download in Voice settings). Auto uses Google speech when the ROM has it, else Vosk.
+- Liquid Glass is now real frosted glass: the background is blurred live and each pane shows its own patch of it, with a smoked/frosted tint, bright top edge and soft shadow. Needs Android 12+ for the blur; older phones get the tint without blur.
+- PyBot knowledge grew to about 7,400 answers.

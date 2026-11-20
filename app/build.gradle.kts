@@ -71,4 +71,7 @@ dependencies {
     // Optional Shizuku support (used only when the user has Shizuku running and grants it).
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Offline speech recognition for ROMs without Google speech (Indian English, Hindi). Vosk needs JNA as an AAR.
+    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation("com.alphacephei:vosk-android:0.3.47")
 }

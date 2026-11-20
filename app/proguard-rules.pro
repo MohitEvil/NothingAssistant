@@ -17,3 +17,9 @@
 -dontwarn rikka.shizuku.**
 -keep class moe.shizuku.** { *; }
 -dontwarn moe.shizuku.**
+
+# Vosk speech recognition talks to its native library through JNA.
+-keep class com.sun.jna.** { *; }
+-keep class org.vosk.** { *; }
+-keepclassmembers class * extends com.sun.jna.** { public *; }
+-dontwarn java.awt.**

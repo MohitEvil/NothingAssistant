@@ -81,7 +81,7 @@ class PanelActivity : ComponentActivity() {
         autoStart = !intent.getBooleanExtra("quiet", false)
         current = this
         enableEdgeToEdge()
-        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing)) { Root() } }
+        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing), com.demon.nothingassistant.ui.LocalGlassBackdrop provides androidx.compose.runtime.remember { com.demon.nothingassistant.ui.GlassBackdropHolder() }) { Root() } }
     }
 
     override fun onNewIntent(intent: Intent) {
