@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -163,6 +164,22 @@ fun AccessScreen(
         Card(palette) {
             NavRow(DotIcons.APPS, "App permissions", "Microphone, contacts, notifications in Android's app page", palette, onOpenAppPermissions)
         }
+        Spacer(Modifier.height(16.dp))
+        val grantScope = androidx.compose.runtime.rememberCoroutineScope()
+        var grantMsg by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+        Card(palette) {
+            ToggleRow("Grant permissions automatically", "With Shizuku or root: every permission, screen control and default assistant, no tapping", settings.autoGrant, palette) { settings.setAutoGrant(it) }
+        }
+        Spacer(Modifier.height(10.dp))
+        PillButton(
+            "GRANT EVERYTHING NOW", filled = true, palette = palette,
+            onClick = {
+                grantMsg = "Working…"
+                grantScope.launch { grantMsg = if (com.demon.nothingassistant.priv.AutoGrant.grantAll(ctx)) com.demon.nothingassistant.priv.AutoGrant.lastSummary else "Needs Shizuku or root access first." }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (grantMsg.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(grantMsg, color = palette.muted, fontSize = 12.sp) }
         Spacer(Modifier.height(16.dp))
         AdvancedAccessCard(settings, palette)
         Spacer(Modifier.height(16.dp))

@@ -171,3 +171,16 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Follow-ups: "and X", "X too", "do it again", answers to "Which app?", he/she questions after web answers.
 - Casual chat works without AI: chatter, moods, reactions and complaints get a conversational reply, never a web search; replies use the last turn ("why?", "really?", "explain").
 - Web and AI answers are cleaned of HTML codes like &#x27;.
+
+## Speech recognition choices (Voice settings > Recogniser)
+- Auto: Google/system speech when the ROM has it, otherwise my own on-device recogniser (it downloads its model by itself the first time).
+- Google / System, On-device Live (streaming Zipformer, words appear as you speak), On-device Accurate (Silero VAD + Moonshine), Two-pass (live words, then Moonshine re-reads for the final text).
+- Models download once from the Voice page and then work with no internet. They run through sherpa-onnx, already in the app for the voice.
+
+## Automatic permissions
+- With Shizuku or root, permissions, overlay/settings/alarm/battery access, screen control and the default assistant are granted by themselves at start (switch and "Grant everything now" button on the Access page).
+- "Set default assistant" uses the same route first and only opens settings if that isn't possible.
+
+## Chat memory (ideas from PyBot, written in Kotlin)
+- Remembers what you tell it on the phone only: "my favourite colour is blue", "I live in Pune", "I work as a nurse", things you like and hate. Ask "what's my favourite colour", "where do I live", "what do you know about me"; "forget what I told you" clears it.
+- A hello in the middle of a chat is a check-in, not a fresh good-morning.

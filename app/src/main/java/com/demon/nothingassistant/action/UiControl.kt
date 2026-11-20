@@ -302,6 +302,8 @@ class UiControl(context: Context) {
         val mineName = name.equals("Nothing Assistant", true) || NothingAccess.norm(name) == "nothingassistant"
         fun isSet() = mineName && runCatching { Settings.Secure.getString(app.contentResolver, "assistant").orEmpty().contains(app.packageName) }.getOrDefault(false)
         if (isSet()) return@withContext ActionResult.Success("Nothing Assistant is already your default assistant.")
+        if (mineName && com.demon.nothingassistant.priv.Priv.available() && com.demon.nothingassistant.priv.AutoGrant.setAssistant(app) && isSet())
+            return@withContext ActionResult.Success("Done. Nothing Assistant is now your default assistant.")
         val i = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (!launch(i)) launch(Intent(Settings.ACTION_SETTINGS))
         val svc = NothingAccess.instance ?: return@withContext ActionResult.Success("I opened the page. Pick $name there. Turn on Accessibility and I'll do it for you next time.")

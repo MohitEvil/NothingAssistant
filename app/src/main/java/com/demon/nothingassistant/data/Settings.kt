@@ -113,6 +113,10 @@ class Settings(context: Context) {
     var bubble by mutableStateOf(sp.getBoolean("bubble", false))
         private set
     var preferOffline by mutableStateOf(sp.getBoolean("prefer_offline", true))
+    /** Which speech recogniser: auto, system, live, accurate, twopass. */
+    var asrEngine by mutableStateOf(sp.getString("asr_engine", "auto") ?: "auto")
+    /** Grant every permission automatically when Shizuku or root is available. */
+    var autoGrant by mutableStateOf(sp.getBoolean("auto_grant", true))
         private set
     var language by mutableStateOf(sp.getString("language", "en-IN") ?: "en-IN")
         private set
@@ -276,6 +280,10 @@ class Settings(context: Context) {
     fun setBatterySaver(v: Boolean) { batterySaver = v; sp.edit().putBoolean("battery_saver", v).apply() }
     @JvmName("applyBubble")
     fun setBubble(v: Boolean) { bubble = v; sp.edit().putBoolean("bubble", v).apply() }
+    @JvmName("applyAsrEngine")
+    fun setAsrEngine(v: String) { asrEngine = v; sp.edit().putString("asr_engine", v).apply() }
+    @JvmName("applyAutoGrant")
+    fun setAutoGrant(v: Boolean) { autoGrant = v; sp.edit().putBoolean("auto_grant", v).apply() }
     @JvmName("applyPreferOffline")
     fun setPreferOffline(v: Boolean) { preferOffline = v; sp.edit().putBoolean("prefer_offline", v).apply() }
     @JvmName("applyLanguage")

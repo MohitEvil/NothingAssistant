@@ -27,6 +27,10 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     companion object {
         /** Our own code: no recognition service installed. */
         const val ERROR_UNAVAILABLE = -1
+        /** No downloaded model for the chosen on-device recogniser. */
+        const val ERROR_NOMODEL = -2
+        /** The on-device recogniser failed to start. */
+        const val ERROR_ENGINE = -3
     }
 
     /** The other guesses the recogniser made for the last thing it heard, best first (without the top one). */
@@ -45,9 +49,42 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
         return android.content.ComponentName(pick.packageName, pick.name)
     }
 
-    fun start(languageTag: String, preferOffline: Boolean) {
-        if (!SpeechRecognizer.isRecognitionAvailable(context) && realService() == null) {
-            listener.onError(ERROR_UNAVAILABLE)
+    private val sherpa get() = SherpaAsr.get(context)
+    private var usingSherpa = false
+
+    /** Which recogniser a turn uses: "auto" (Google/system if the ROM has one, else on-device), "system", "live", "accurate" or "twopass". */
+    private fun pickSherpa(choice: String, systemOk: Boolean): SherpaAsr.Mode? {
+        val sh = sherpa
+        return when (choice) {
+            "system" -> null
+            "live" -> if (sh.ready(SherpaAsr.Mode.LIVE)) SherpaAsr.Mode.LIVE else null
+            "accurate" -> if (sh.ready(SherpaAsr.Mode.ACCURATE)) SherpaAsr.Mode.ACCURATE else null
+            "twopass" -> when {
+                sh.ready(SherpaAsr.Mode.TWOPASS) && sh.installed(AsrModel.ACCURATE) -> SherpaAsr.Mode.TWOPASS
+                sh.ready(SherpaAsr.Mode.LIVE) -> SherpaAsr.Mode.LIVE
+                else -> null
+            }
+            else -> if (systemOk) null else sh.bestAvailable()
+        }
+    }
+
+    fun start(languageTag: String, preferOffline: Boolean, choice: String = "auto") {
+        val systemOk = SpeechRecognizer.isRecognitionAvailable(context) || realService() != null
+        val mode = pickSherpa(choice, systemOk)
+        if (mode != null) {
+            usingSherpa = true
+            generation++
+            runCatching { recognizer?.cancel() }
+            sherpa.start(mode, listener)
+            return
+        }
+        usingSherpa = false
+        if (!systemOk) {
+            if (choice != "system" && sherpa.libraryPresent) {
+                if (choice == "auto" || choice == "live" || choice == "twopass") sherpa.download(AsrModel.LIVE)
+                if (choice == "accurate") sherpa.download(AsrModel.ACCURATE)
+            }
+            listener.onError(if (choice == "system" || !sherpa.libraryPresent) ERROR_UNAVAILABLE else ERROR_NOMODEL)
             return
         }
         val gen = ++generation
@@ -100,6 +137,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
 
     /** Stop capturing and deliver whatever was heard so far. */
     fun stopListening() {
+        if (usingSherpa) { sherpa.finish(); return }
         Cue.hushThenRelease(context, 1500)
         recognizer?.stopListening()
     }
@@ -107,6 +145,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     /** Stop listening and ignore anything still on its way. The recognizer is kept for the next turn. */
     fun cancel() {
         generation++
+        if (usingSherpa) { sherpa.cancel(); return }
         Cue.hushThenRelease(context, 1500)
         recognizer?.let { runCatching { it.cancel() } }
     }
@@ -114,6 +153,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     /** Tear the recognizer down completely (screen closed, or the service dropped). */
     fun release() {
         generation++
+        if (usingSherpa) sherpa.cancel()
         Cue.hushThenRelease(context, 1500)
         recognizer?.let {
             runCatching { it.cancel() }

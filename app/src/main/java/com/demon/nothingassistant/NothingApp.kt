@@ -1,6 +1,7 @@
 package com.demon.nothingassistant
 
 import android.app.Application
+import kotlinx.coroutines.launch
 import com.demon.nothingassistant.core.AssistantController
 import com.demon.nothingassistant.data.Settings
 
@@ -17,8 +18,12 @@ class NothingApp : Application() {
         com.demon.nothingassistant.action.Blackboard.init(this)
         com.demon.nothingassistant.agent.Skills.init(this)
         com.demon.nothingassistant.audio.Cue.recover(this)
+        com.demon.nothingassistant.ai.Banter.init(this)
         settings = Settings(this)
         com.demon.nothingassistant.priv.Priv.preference = { settings.privMode }
         controller = AssistantController(this, settings)
+        if (settings.autoGrant) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default).launch {
+            com.demon.nothingassistant.priv.AutoGrant.runOnce(this@NothingApp)
+        }
     }
 }

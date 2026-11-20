@@ -1,5 +1,7 @@
 package com.demon.nothingassistant.ai
 
+import android.content.Context
+import org.json.JSONObject
 import kotlin.random.Random
 
 /**
@@ -17,7 +19,86 @@ object Banter {
         return c
     }
 
-    private val fillers = Regex("\\b(the hell|the heck|the fuck|the hell|bro|bruh|yaar|dude|man|buddy|boss|please|pls|just|actually|basically|like|literally|btw|hmm+|umm+|uh+|well|so)\\b", I)
+    // ---- What the person tells me about themselves (kept on the phone only), in the spirit of PyBot's "said fact back" ----
+
+    private var prefs: android.content.SharedPreferences? = null
+    private val facts = HashMap<String, String>()
+    private var lastChatAt = 0L
+
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences("banter", Context.MODE_PRIVATE)
+        runCatching {
+            val j = JSONObject(prefs?.getString("facts", "{}") ?: "{}")
+            j.keys().forEach { facts[it] = j.getString(it) }
+        }
+    }
+
+    private fun save() { prefs?.edit()?.putString("facts", JSONObject(facts as Map<*, *>).toString())?.apply() }
+
+    fun forget() { facts.clear(); save() }
+
+    private val recall = Regex("^(?:what(?:s| is| are)|tell me|do you (?:remember|know)|remind me)(?: what)? (?:my|i|me)\\b|^where do i (?:live|stay|work|study)|^what do i (?:like|love|do|hate|study)|^who am i|^do you remember me|^what did i (?:say|tell you)|^(?:what|which) .{0,20}\\bdo i (?:like|love|hate|prefer)", I)
+
+    private fun cleanVal(v: String) = v.trim().trimEnd('.', '!', '?').take(60).trim()
+
+    /** Picks up facts like "my favourite colour is blue", "I live in Pune", "I work as a nurse", and answers questions about them. */
+    private fun factTalk(t: String): String? {
+        // Recall
+        Regex("^what(?:s| is) my (.{2,30})$").find(t)?.let {
+            val k = it.groupValues[1].trim().removePrefix("favourite ").removePrefix("favorite ")
+            val v = facts["my " + it.groupValues[1].trim()] ?: facts["my $k"] ?: facts["favourite $k"]
+            if (v != null) return pick("recall", listOf("Your ${it.groupValues[1].trim()} is $v.", "That's $v.", "You told me it's $v."))
+            if (it.groupValues[1].trim() != "name") return "You haven't told me your ${it.groupValues[1].trim()} yet. What is it?"
+        }
+        if (Regex("^where do i (live|stay)$").matches(t)) return facts["lives"]?.let { "You live in $it." } ?: "You haven't told me where you live yet."
+        if (Regex("^where do i (work|study)$").matches(t)) return facts["works"]?.let { "You $it." } ?: "You haven't told me yet."
+        if (Regex("^what do i (do|work as)$").matches(t)) return facts["works"]?.let { "You $it." } ?: "You haven't told me what you do yet."
+        if (Regex("^what do i (like|love|enjoy)$|^what are my (hobbies|interests|favourites|favorites)$").matches(t)) {
+            val l = facts["likes"]
+            return if (l.isNullOrBlank()) "You haven't told me what you like yet. Tell me one thing you love." else "You told me you like $l."
+        }
+        if (Regex("^what do i (hate|dislike)$").matches(t)) return facts["dislikes"]?.let { "You said you don't like $it." } ?: "You haven't told me what you dislike."
+        if (Regex("^(do you remember me|who am i|what do you know about me|what did i tell you|what did i say)$").matches(t)) {
+            if (facts.isEmpty() && prefs?.getString("name", null) == null) return "We're just getting to know each other. Tell me your name, or something you like."
+            val bits = ArrayList<String>()
+            facts["lives"]?.let { bits.add("you live in $it") }
+            facts["works"]?.let { bits.add("you $it") }
+            facts["likes"]?.let { bits.add("you like $it") }
+            facts.filterKeys { it.startsWith("my ") }.forEach { (k, v) -> bits.add("your ${k.removePrefix("my ")} is $v") }
+            return if (bits.isEmpty()) "I remember what you've told me, and so far that's not much. Tell me about yourself." else "I remember that " + bits.take(5).joinToString(", ") + "."
+        }
+        if (Regex("^(forget (?:everything|what i told you|me)|clear (?:what you know about me|my facts))$").matches(t)) { forget(); return "Done. I've forgotten what you told me." }
+
+        // Capture
+        Regex("^my ((?:favou?rite )?[a-z ]{2,25}?) (?:is|are) (.{1,60})$").find(t)?.let {
+            val k = it.groupValues[1].trim().replace("favorite", "favourite")
+            if (k != "name") { facts["my $k"] = cleanVal(it.groupValues[2]); save()
+                return pick("learn", listOf("Got it, your $k is ${cleanVal(it.groupValues[2])}. I'll remember that.", "Nice, ${cleanVal(it.groupValues[2])}. Noted.", "Okay, I'll remember that your $k is ${cleanVal(it.groupValues[2])}.")) }
+        }
+        Regex("^i (?:live|stay|am living|am staying) in (.{2,40})$").find(t)?.let { facts["lives"] = cleanVal(it.groupValues[1]); save(); return pick("live", listOf("${cleanVal(it.groupValues[1])}, nice. I'll remember that.", "Good to know you're in ${cleanVal(it.groupValues[1])}.")) }
+        Regex("^i (?:work|am working) (as|at|in|for) (.{2,40})$").find(t)?.let { facts["works"] = "work ${it.groupValues[1]} ${cleanVal(it.groupValues[2])}"; save(); return "Got it, you work ${it.groupValues[1]} ${cleanVal(it.groupValues[2])}. Noted." }
+        Regex("^i (?:study|am studying) (.{2,40})$").find(t)?.let { facts["works"] = "study ${cleanVal(it.groupValues[1])}"; save(); return "Nice, ${cleanVal(it.groupValues[1])}. Good luck with it." }
+        Regex("^i (?:really )?(?:like|love|enjoy|adore) (.{2,40})$").find(t)?.let {
+            val o = cleanVal(it.groupValues[1]).removePrefix("to ").removePrefix("the ")
+            val cur = facts["likes"].orEmpty().split(", ").filter { x -> x.isNotBlank() }.toMutableList()
+            if (o !in cur) { cur.add(o); facts["likes"] = cur.takeLast(8).joinToString(", "); save() }
+        }
+        Regex("^i (?:really )?(?:hate|dislike|cant stand) (.{2,40})$").find(t)?.let {
+            val o = cleanVal(it.groupValues[1]); val cur = facts["dislikes"].orEmpty().split(", ").filter { x -> x.isNotBlank() }.toMutableList()
+            if (o !in cur) { cur.add(o); facts["dislikes"] = cur.takeLast(6).joinToString(", "); save() }
+        }
+        return null
+    }
+
+    /** Hello in the middle of a running chat is a check-in, not a fresh morning. */
+    private fun checkIn(t: String, name: String): String? {
+        if (!Regex("^(hi|hello|hey|hii+|yo|hey again|hello again|hi again|im here|im back)$").matches(t)) return null
+        if (System.currentTimeMillis() - lastChatAt > 10 * 60_000L) return null
+        val who = if (name.isNotBlank()) " $name" else ""
+        return pick("checkin", listOf("Hi$who, still here. Where were we?", "Hello again$who. What's next?", "Still here$who. Anything changed?"))
+    }
+
+    private val fillers = Regex("\\b(the hell|the heck|the fuck|the hell|bro|bruh|yaar|dude|man|buddy|boss|please|pls|just|actually|basically|literally|btw|hmm+|umm+|uh+|well|so)\\b", I)
 
     /** Lowercase, no punctuation or filler words. */
     fun norm(raw: String): String = raw.lowercase().replace("’", "").replace("'", "")
@@ -32,6 +113,7 @@ object Banter {
         val t = norm(raw)
         if (t.isEmpty()) return false
         val words = t.split(' ')
+        if (recall.containsMatchIn(t) || Regex("^my [a-z ]{2,25} (is|are) ").containsMatchIn(t) || Regex("^i (live|stay|work|study|am studying|am working) ").containsMatchIn(t)) return true
         if (factual.containsMatchIn(t) && !aboutUs.containsMatchIn(t)) return false
         if (words.size <= 3 && !Regex("^(who|when|where|which|define|meaning)\\b").containsMatchIn(t)) return true
         if (aboutUs.containsMatchIn(t) && words.size <= 12) return true
@@ -43,6 +125,9 @@ object Banter {
     fun reply(raw: String, lastReply: String?, lastUser: String?, justActed: Boolean): String? {
         val t = norm(raw)
         if (t.isEmpty()) return null
+        lastChatAt = System.currentTimeMillis()
+        checkIn(t, prefs?.getString("name", "") ?: "")?.let { return it }
+        factTalk(t)?.let { return it }
 
         if (Regex("^(wtf|what are you doing|what is wrong with you|whats wrong with you|why did you do that|why are you doing that|what did you do|why would you do that|what was that|stop doing that|why did you open that|you did it wrong|that wasnt what i asked)$").matches(t) ||
             Regex("what are you doing|why are you doing this|why did you do").containsMatchIn(t) && Regex("hell|heck|wtf").containsMatchIn(raw.lowercase())) {

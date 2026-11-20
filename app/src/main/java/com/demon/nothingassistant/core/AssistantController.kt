@@ -129,7 +129,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 speech.release()
                 scope.launch {
                     delay(400)
-                    if (micActive && token == flow) speech.start(settings.language, settings.preferOffline)
+                    if (micActive && token == flow) speech.start(settings.language, settings.preferOffline, settings.asrEngine)
                 }
                 return
             }
@@ -153,7 +153,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
         1, 2, 4 -> "Speech recognition needs internet right now. Try again online."
         5, 10, 11 -> "The speech service dropped. Tap the glyph to try again."
         12, 13 -> "That language isn't available offline. Pick another in Settings."
-        SpeechEngine.ERROR_UNAVAILABLE -> "No speech recognition service found on this phone."
+        SpeechEngine.ERROR_UNAVAILABLE -> "No speech recognition service found on this phone. Download an on-device speech model in Voice settings."
+        SpeechEngine.ERROR_NOMODEL -> "This phone has no Google speech, so I'm downloading my own speech model now. Try again in a minute. Progress is in Voice settings."
+        SpeechEngine.ERROR_ENGINE -> "The on-device speech engine couldn't start. Try another engine in Voice settings."
         else -> "Speech error ($code). Tap to try again."
     }
 
@@ -261,7 +263,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         haptics.lightTap()
         micActive = true
         com.demon.nothingassistant.audio.Cue.listening()
-        speech.start(settings.language, settings.preferOffline)
+        speech.start(settings.language, settings.preferOffline, settings.asrEngine)
     }
 
     private fun noMatch() {
@@ -272,7 +274,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             scope.launch {
                 delay(150)
                 if (micActive && _ui.value.state == AssistantState.LISTENING) {
-                    speech.start(settings.language, settings.preferOffline)
+                    speech.start(settings.language, settings.preferOffline, settings.asrEngine)
                 }
             }
         } else {
