@@ -425,6 +425,11 @@ sealed class Command {
         override fun describe() = "Summarising…"
     }
 
+    /** "Change the default digital assistant app to Google". */
+    data class SetDefaultAssistant(val name: String) : Command() {
+        override fun describe() = "Changing the default assistant…"
+    }
+
     /** "Undo that", "turn it back off": puts back what the last switch was before. */
     data object Undo : Command() {
         override fun describe() = "Putting it back…"

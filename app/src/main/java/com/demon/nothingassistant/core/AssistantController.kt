@@ -409,6 +409,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private val forgetChat = Regex("^(?:clear|forget|delete|erase|reset)\\s+(?:our |the |my |all )?(?:chat |conversation |assistant )?(?:history|conversation|chat)$", RegexOption.IGNORE_CASE)
 
     /** The sentence and plan from Needle or the cloud, kept until it is known whether the plan worked. */
+    /** Set when the assistant asked "which app?": the next short answer completes the command. */
+    @Volatile private var awaitingApp: ((String) -> Command)? = null
+
     @Volatile private var pendingLearn: Pair<String, org.json.JSONArray?>? = null
     @Volatile private var replayPattern: String? = null
 
@@ -442,7 +445,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         val vagueOpen = grammar is Command.OpenApp && (grammar.name.trim().split(Regex("\\s+")).size >= 3 || grammar.name.trim().startsWith("my ", true))
         if (known && grammar !is Command.Chain && grammar !is Command.Task && !vagueOpen) { AppLog.d("route", "tier1/2 ${grammar.javaClass.simpleName}"); return grammar }
         // Tier 3: Needle 3
-        val n = runCatching { planner.needle(text) }.getOrNull()
+        val n = runCatching { planner.needle(text) }.getOrNull()?.takeIf { com.demon.nothingassistant.agent.PlanGuard.ok(text, it.command).also { ok -> if (!ok) AppLog.d("route", "needle plan rejected: not backed by the words said") } }
         if (n != null) {
             val better = !known || n.confidence >= 0.8 || stepCount(n.command) > stepCount(grammar)
             if (better) { AppLog.d("route", "needle"); pendingLearn = text to n.raw; return n.command }
@@ -451,7 +454,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         val long = text.trim().split(Regex("\\s+")).size >= 9
         if (brain.configured() && (!known || grammar is Command.Chain || long)) {
             transition(AssistantState.THINKING, "Planning…", text)
-            val c = runCatching { planner.cloud(text, history.recent()) }.getOrNull()
+            val c = runCatching { planner.cloud(text, history.recent()) }.getOrNull()?.takeIf { com.demon.nothingassistant.agent.PlanGuard.ok(text, it.command) }
             if (c != null) { AppLog.d("route", "cloud"); pendingLearn = text to c.raw; return c.command }
         }
         if (known) { AppLog.d("route", "grammar"); return grammar }
@@ -474,6 +477,18 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 success("Done. I've cleared our chat history.", text)
                 return@launch
             }
+            // The answer to "Which app do you mean?" is just a name.
+            awaitingApp?.let { make ->
+                awaitingApp = null
+                val g = bestParse(text)
+                val words = text.trim().trimEnd('.', '!', '?').split(Regex("\\s+"))
+                if ((g is Command.Unknown || g is Command.OpenApp) && words.size <= 4 && !Regex("^(?:no|nope|cancel|stop|never ?mind|forget it)$", RegexOption.IGNORE_CASE).matches(text.trim().trimEnd('.', '!', '?'))) {
+                    execute(make(words.joinToString(" ").removePrefix("the ").removeSuffix(" app").trim()), text)
+                    return@launch
+                }
+            }
+            // "Do it again", "and Bluetooth too": built from what just worked.
+            com.demon.nothingassistant.intent.FollowUp.resolve(text)?.let { execute(it, text); return@launch }
             val grammar = bestParse(text)
             if (grammar is Command.Question) { chat(text, question = true); return@launch }
             val plan = route(text, grammar)
@@ -492,6 +507,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             is ActionResult.Success -> {
                 val launch = result.launch
                 history.addPair(text, result.message.ifBlank { "Done." }, "action")
+                com.demon.nothingassistant.intent.FollowUp.remember(text, cmd)
                 pendingLearn?.let { (t, raw) -> if (t == text) com.demon.nothingassistant.agent.Skills.learn(t, raw) }
                 replayPattern?.let { com.demon.nothingassistant.agent.Skills.succeeded(it) }
                 pendingLearn = null; replayPattern = null
@@ -503,6 +519,12 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 history.addPair(text, result.message, "action")
                 replayPattern?.let { com.demon.nothingassistant.agent.Skills.failed(it) }
                 pendingLearn = null; replayPattern = null
+                awaitingApp = if (result.message.startsWith("Which app")) when (cmd) {
+                    is Command.InstallApp -> { n: String -> Command.InstallApp(n) }
+                    is Command.UpdateApp -> { n: String -> Command.UpdateApp(n) }
+                    is Command.OpenApp -> { n: String -> Command.OpenApp(n) }
+                    else -> null
+                } else null
                 fail(result.message, text, session = true)
             }
             is ActionResult.Confirm -> askConfirm(
@@ -577,13 +599,21 @@ class AssistantController(private val context: Context, val settings: Settings) 
             respond(text, small)
             return
         }
+        val casual = com.demon.nothingassistant.ai.Banter.isCasual(text)
+        if (!brain.configured() || casual) {
+            val acted = com.demon.nothingassistant.action.Blackboard.status("what did you just do") != null
+            com.demon.nothingassistant.ai.Banter.reply(text, history.lastReply(), history.lastChatQuestion(), acted)?.let {
+                remember(text, it); respond(text, it); return
+            }
+        }
         if (brain.configured()) {
             transition(AssistantState.THINKING, "Thinking…", text)
             // Fresh facts from the web, boiled down to a few sentences, so the AI answers from them instead of guessing.
             val factual = question || Regex("^(?:who|what|when|where|which|how (?:many|much|old|far|tall|long)|is|are|does|did|was|were)\\b", RegexOption.IGNORE_CASE).containsMatchIn(t)
             val ref = if (factual && t.split(Regex("\\s+")).size >= 3)
                 runCatching { kotlinx.coroutines.withTimeoutOrNull(3500) { com.demon.nothingassistant.action.WebInfo.answer(text, history.lastChatQuestion()) } }.getOrNull() else null
-            val sys = if (ref != null) "You are a voice assistant. Answer in at most two short sentences, no markdown. Use this web summary if it helps and say nothing about it being a summary: $ref" else null
+            val chatty = "You are a warm, friendly voice assistant on the user's phone. Reply like a person in one or two short sentences, match the user's tone and language, no markdown, no lectures. For casual talk just chat naturally."
+            val sys = if (casual) chatty else if (ref != null) "You are a voice assistant. Answer in at most two short sentences, no markdown. Use this web summary if it helps and say nothing about it being a summary: $ref" else null
             val reply = brain.ask(com.demon.nothingassistant.ai.Summarizer.compactHistory(history.recent()), text, sys).getOrNull()
             if (reply != null) {
                 remember(text, reply)
@@ -592,6 +622,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
             }
         }
         // AI chat is off: look it up on the web instead (quick, no key needed).
+        if (casual) {
+            val c = com.demon.nothingassistant.ai.Banter.fallback(text)
+            remember(text, c); respond(text, c); return
+        }
         if (text.trim().split(Regex("\\s+")).size >= 2) {
             transition(AssistantState.THINKING, "Searching the web…", text)
             val web = com.demon.nothingassistant.action.WebInfo.answer(text, history.lastChatQuestion())
@@ -608,7 +642,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun remember(user: String, reply: String) = history.addPair(user, reply, "chat")
 
     /** Shows and speaks an answer, then opens the mic again for a follow-up. */
-    private fun respond(text: String, reply: String) {
+    private fun respond(text: String, rawReply: String) {
+        val reply = com.demon.nothingassistant.ai.TextClean.decode(rawReply)
         val token = ++flow
         transition(AssistantState.SPEAKING, "", text, reply = reply)
         haptics.veryLightTap()

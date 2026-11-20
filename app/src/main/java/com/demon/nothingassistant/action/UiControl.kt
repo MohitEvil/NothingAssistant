@@ -297,32 +297,33 @@ class UiControl(context: Context) {
         return l in searchWords || (searchLike.matches(l) && !l.startsWith("message") && !l.startsWith("chat")) || l == "search"
     }
 
-    /** Opens Android's default-assistant page and selects Nothing Assistant by itself (needs Accessibility). Falls back to leaving the page open. */
-    suspend fun setDefaultAssistant(): ActionResult = withContext(Dispatchers.Default) {
-        fun isSet() = runCatching { Settings.Secure.getString(app.contentResolver, "assistant").orEmpty().contains(app.packageName) }.getOrDefault(false)
+    /** Opens Android's default-assistant page and selects [name] there by itself (needs Accessibility). */
+    suspend fun setDefaultAssistant(name: String = "Nothing Assistant"): ActionResult = withContext(Dispatchers.Default) {
+        val mineName = name.equals("Nothing Assistant", true) || NothingAccess.norm(name) == "nothingassistant"
+        fun isSet() = mineName && runCatching { Settings.Secure.getString(app.contentResolver, "assistant").orEmpty().contains(app.packageName) }.getOrDefault(false)
         if (isSet()) return@withContext ActionResult.Success("Nothing Assistant is already your default assistant.")
         val i = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (!launch(i)) launch(Intent(Settings.ACTION_SETTINGS))
-        val svc = NothingAccess.instance ?: return@withContext ActionResult.Success("I opened the page. Pick Nothing Assistant there. Turn on Accessibility and I'll do it for you next time.")
+        val svc = NothingAccess.instance ?: return@withContext ActionResult.Success("I opened the page. Pick $name there. Turn on Accessibility and I'll do it for you next time.")
         delay(1200)
-        val mine = listOf("Nothing Assistant")
+        var picked = false
         repeat(4) {
-            val row = svc.waitFind(mine, 2500)
+            val row = svc.waitFind(listOf(name), 2500)
             if (row != null) {
                 svc.clickSure(row)
+                picked = true
                 delay(500)
-                // "Make Nothing Assistant your default?" dialog
+                // "Make $name your default?" dialog
                 svc.waitFind(listOf("OK", "Set", "Yes", "Confirm", "Allow", "Agree"), 1800)?.takeIf { !it.isEditable }?.let { svc.click(it); delay(500) }
-                if (isSet()) return@withContext ActionResult.Success("Done. Nothing Assistant is now your default assistant.")
+                if (isSet() || (!mineName && picked)) return@withContext ActionResult.Success("Done. $name is now your default assistant.")
             } else {
                 // The first page only shows the current choice: open it.
                 svc.find(listOf("Default digital assistant app", "Digital assistant app", "Assist app", "Default assistant"))?.let { svc.clickSure(it); delay(900) }
                     ?: Ocr.read(svc)?.firstOrNull { NothingAccess.norm(it.text).contains("digitalassistant") }?.let { l -> svc.tapAt(l.box.exactCenterX(), l.box.exactCenterY()); delay(900) }
             }
-            if (isSet()) return@withContext ActionResult.Success("Done. Nothing Assistant is now your default assistant.")
         }
-        if (isSet()) ActionResult.Success("Done. Nothing Assistant is now your default assistant.")
-        else ActionResult.Failure("I opened the page but couldn't select it. Tap Nothing Assistant in the list.")
+        if (isSet() || (!mineName && picked)) ActionResult.Success("Done. $name is now your default assistant.")
+        else ActionResult.Failure("I opened the page but couldn't select $name. Tap it in the list.")
     }
 
     /** Waits for one of [labels] to show as a button (accessibility first, then the pixels) and presses it. */

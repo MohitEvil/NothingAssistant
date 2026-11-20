@@ -29,8 +29,8 @@ object WebInfo {
 
     private fun unescape(s: String): String = s
         .replace("<![CDATA[", "").replace("]]>", "")
-        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'")
-        .replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim()
+        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'")
+        .replace(Regex("<[^>]+>"), " ").let { com.demon.nothingassistant.ai.TextClean.decode(it) }
 
     class Headline(val title: String, val source: String)
 

@@ -125,11 +125,13 @@ class PlayStore(
         var worked = false
         var retries = 0
         var lastKick = start
+        var unknown = 0
         delay(1200)
         while (System.currentTimeMillis() < end) {
             if (!svc.hasPackage(store)) { delay(1500); if (!svc.hasPackage(store) && !update && pmHas(pkg)) return ActionResult.Success("Installed $label."); }
             val p = readPage(svc)
             AppLog.d("play", "wait state=${p.state}")
+            if (p.state != St.UNKNOWN) unknown = 0
             when (p.state) {
                 St.WORKING -> { worked = true; progress((if (update) "Updating " else "Installing ") + label + "…" + (percent(svc)?.let { " $it" } ?: "")) }
                 St.INSTALLED -> if (worked || System.currentTimeMillis() - lastKick > 4500) return ActionResult.Success(if (update) "Updated $label. It's ready to open." else "Installed $label. It's ready to open.")
@@ -138,7 +140,13 @@ class PlayStore(
                     if (!worked && System.currentTimeMillis() - lastKick > 5000 && retries < 2) { retries++; lastKick = System.currentTimeMillis(); p.button?.let { press(svc, it) } }
                     else if (worked && System.currentTimeMillis() - lastKick > 8000) return ActionResult.Failure("The download of $label stopped. Check your connection and the Play Store.")
                 }
-                St.UNKNOWN -> svc.find(listOf("Skip", "Not now", "No thanks", "Maybe later", "Got it"))?.let { svc.click(it) }
+                St.UNKNOWN -> {
+                    unknown++
+                    svc.find(listOf("Skip", "Not now", "No thanks", "Maybe later", "Got it"))?.let { svc.click(it) }
+                    // Not the Play Store at all, or its page never became readable: stop instead of waiting for minutes.
+                    if (!svc.hasPackage(store) && unknown >= 3) return ActionResult.Failure("I lost the Play Store screen while waiting for $label. Nothing was changed by me after that.")
+                    if (unknown >= 8 && !worked) return ActionResult.Failure("I couldn't read the Play Store page for $label, so I stopped. Open it and tell me what to tap.")
+                }
                 St.PAID -> return ActionResult.Failure("$label is a paid app, so I won't buy it.")
                 St.UNAVAILABLE -> return ActionResult.Failure("$label isn't available for this phone on the Play Store.")
             }

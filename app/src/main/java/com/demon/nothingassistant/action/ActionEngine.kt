@@ -123,7 +123,7 @@ class ActionEngine(context: Context) {
     }
 
     /** Keeps the blackboard current: what "it" means next, and what a switch was before (for undo). */
-    suspend fun setDefaultAssistant(): ActionResult = ui.setDefaultAssistant()
+    suspend fun setDefaultAssistant(name: String = "Nothing Assistant"): ActionResult = ui.setDefaultAssistant(name)
 
     private fun learnFrom(cmd: Command, r: ActionResult) {
         val ok = r is ActionResult.Success
@@ -161,6 +161,7 @@ class ActionEngine(context: Context) {
         Command.DeleteScreenshot -> device.deleteScreenshot()
         is Command.Summarize -> summarize(cmd.what)
         Command.Undo -> undo()
+        is Command.SetDefaultAssistant -> ui.setDefaultAssistant(cmd.name)
         Command.UiRepeat -> lastScreen?.let { runSuspendInner(it) } ?: ActionResult.Failure("I don't have anything to repeat yet.")
         is Command.UiX -> smart.run(cmd)
         is Command.Weather -> Weather.now(cmd.place, cmd.tomorrow)
@@ -253,7 +254,7 @@ class ActionEngine(context: Context) {
     }
 
     /** True for commands that take a moment because they drive another screen. */
-    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Priv || cmd is Command.Task || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.UpdateApp || cmd is Command.ReadSms || cmd === Command.DeleteScreenshot || cmd is Command.Summarize || cmd === Command.Undo || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Priv || cmd is Command.Task || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.UpdateApp || cmd is Command.SetDefaultAssistant || cmd is Command.ReadSms || cmd === Command.DeleteScreenshot || cmd is Command.Summarize || cmd === Command.Undo || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
         cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
         (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
 
@@ -323,7 +324,7 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain, is Command.Wait, is Command.SharePhoto, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp, is Command.UpdateApp, is Command.ReadSms, Command.DeleteScreenshot, is Command.Summarize, Command.Undo ->
+        is Command.TakePhoto, is Command.Chain, is Command.Wait, is Command.SharePhoto, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp, is Command.UpdateApp, is Command.SetDefaultAssistant, is Command.ReadSms, Command.DeleteScreenshot, is Command.Summarize, Command.Undo ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }

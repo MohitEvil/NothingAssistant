@@ -199,11 +199,25 @@ class NothingAccess : AccessibilityService() {
         var c: AccessibilityNodeInfo? = n
         var i = 0
         while (c != null && i < 7) {
-            if (c.isClickable && c.isEnabled && c.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            // A parent that holds many separate buttons is a container, not the thing asked for: pressing it would hit something else.
+            if (c.isClickable && c.isEnabled && (c === n || countClickable(c, 0) < 4) && c.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
             c = c.parent
             i++
         }
         return tapCentre(n)
+    }
+
+    private fun countClickable(n: AccessibilityNodeInfo, depth: Int): Int {
+        if (depth > 4) return 0
+        var k = 0
+        for (i in 0 until n.childCount) {
+            val ch = n.getChild(i) ?: continue
+            if (ch.isClickable && ch.isVisibleToUser) k++
+            if (k >= 4) return k
+            k += countClickable(ch, depth + 1)
+            if (k >= 4) return k
+        }
+        return k
     }
 
     /**
@@ -690,7 +704,7 @@ class NothingAccess : AccessibilityService() {
                         var p = n.parent
                         var i = 0
                         while (p != null && i < 6) {
-                            if (p.isClickable) { hit = p; clickable = true; break }
+                            if (p.isClickable && countClickable(p, 0) < 4) { hit = p; clickable = true; break }
                             p = p.parent
                             i++
                         }

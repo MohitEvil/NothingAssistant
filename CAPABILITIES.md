@@ -162,3 +162,12 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Settings now has sections: Voice (with language and speech recognition), AI settings, Appearance, Access and permissions (phone control, app permissions, Shizuku/root).
 - Appearance: theme, Nothing / Liquid glass / Minimal glass, accent colour, dot blob, typing text, animations, battery saver.
 - Dot-matrix icons, squishy press animation, dot blob while it listens/thinks/works, words typed as it speaks, animated dots on status lines.
+
+## Latest round
+- Dot blob is now a 3D liquid sphere: rotates, ripples, lit with a highlight, reacts to voice level; sweep while thinking, orbit ring while executing.
+- Liquid Glass look: drifting soft light blobs behind the glass, diagonal sheen and brighter rim. Nothing and Minimal Glass unchanged.
+- Plan guard: a tool call from Needle or the cloud AI must be backed by words in what you said (no more "set default assistant" turning into a Google update).
+- Set default assistant to Google or any other app has its own command; Play Store waits are bounded.
+- Follow-ups: "and X", "X too", "do it again", answers to "Which app?", he/she questions after web answers.
+- Casual chat works without AI: chatter, moods, reactions and complaints get a conversational reply, never a web search; replies use the last turn ("why?", "really?", "explain").
+- Web and AI answers are cleaned of HTML codes like &#x27;.

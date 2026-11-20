@@ -12,6 +12,17 @@ object DevicePhrases {
         val s = raw.trim().trimEnd('.', '!', '?').replace("’", "'").replace(Regex("\\s+"), " ")
         val t = s.lowercase()
 
+        // ---- default assistant ----
+        Regex("^(?:change|set|switch|select|choose|make|pick)(?: the| my)?(?: default)?(?: digital)? assistant(?: app)?(?: to| as)\\s+(.+)$", I).find(t)?.let { m ->
+            return Command.SetDefaultAssistant(m.groupValues[1].trim().split(' ').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } })
+        }
+        Regex("^(?:make|set) (.+?) (?:as )?(?:my |the )?default(?: digital)? assistant(?: app)?$", I).find(t)?.let { m ->
+            return Command.SetDefaultAssistant(m.groupValues[1].trim().split(' ').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } })
+        }
+        Regex("^(?:change|set|switch)(?: the| my)? default(?: digital)? assistant(?: app)?(?: to| as)\\s+(.+)$", I).find(t)?.let { m ->
+            return Command.SetDefaultAssistant(m.groupValues[1].trim().split(' ').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } })
+        }
+
         // ---- screenshots ----
         if (Regex("\\b(delete|remove|erase|trash|get rid of)\\b", I).containsMatchIn(t) && Regex("\\bscreen ?shots?\\b", I).containsMatchIn(t)) return Command.DeleteScreenshot
         if (Regex("^(?:delete|remove|erase|trash|get rid of)(?: it| that| this| the last one| the one (?:you|we|i) (?:just )?(?:took|made|captured)| the (?:picture|photo|image|pic) (?:you|we|i) (?:just )?(?:took|made|captured))(?: please)?$", I).matches(t)

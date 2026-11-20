@@ -116,7 +116,7 @@ class SmartUi(private val ui: UiControl, context: Context) {
             is Loc.Many -> ask(svc, loc.list, c, name.ifBlank { target }, -1)
             is Loc.Weak ->
                 if (c.act == ScreenAct.ASK) ActionResult.Success("I can't see “$name” exactly, but I can see “${loc.label}”. Say tap it if that's what you mean.")
-                else if (c.act != ScreenAct.DELETE && (loc.score >= 72 || loc.margin >= 15)) {
+                else if (c.act != ScreenAct.DELETE && (loc.score >= 90 || (loc.score >= 80 && loc.margin >= 18))) {
                     // A clear closest match: just do it. Asking "did you mean?" and then not acting is the worst of both.
                     val r = act(svc, loc.cand, c.act, approved = c.approved)
                     if (r is ActionResult.Success) ActionResult.Success("I couldn't see “$name” exactly, so I used “${loc.label}”. " + r.message) else r

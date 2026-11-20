@@ -4,20 +4,37 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.LongState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import com.demon.nothingassistant.core.AssistantState
 import kotlin.math.PI
-import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+private class Pts(val x: FloatArray, val y: FloatArray, val z: FloatArray)
+
+/** Evenly spread points on a sphere (golden-angle spiral). */
+private fun sphere(n: Int): Pts {
+    val x = FloatArray(n); val y = FloatArray(n); val z = FloatArray(n)
+    val ga = (PI * (3.0 - sqrt(5.0))).toFloat()
+    for (i in 0 until n) {
+        val yy = 1f - 2f * (i + 0.5f) / n
+        val r = sqrt(1f - yy * yy)
+        val th = ga * i
+        x[i] = cos(th) * r; y[i] = yy; z[i] = sin(th) * r
+    }
+    return Pts(x, y, z)
+}
+
 /**
- * The Nothing "blob": a Siri-like living shape made of dots. Its outline wobbles with the voice,
- * swirls while it thinks, orbits while it works and breathes while it waits. Dots are bigger and whiter toward the middle.
+ * The Nothing blob: a liquid 3D ball made of dots. It turns in space, its skin ripples with the voice, and it is lit from one side,
+ * so the near side is big and bright, the far side small and faint, with a soft glow and a highlight on top. Siri's feel, drawn in Nothing's dots.
  */
 @Composable
 fun DotBlob(
@@ -29,76 +46,96 @@ fun DotBlob(
     palette: GlyphPalette,
     modifier: Modifier = Modifier
 ) {
+    val pts = remember { sphere(900) }
+    val ring = remember { FloatArray(48) { (it * 2 * PI / 48).toFloat() } }
     Canvas(modifier) {
         val s = size.minDimension
         val c = Offset(size.width / 2f, size.height / 2f)
         val t = if (animate) (clock.longValue % 1_000_000L) / 1000f else 0f
         val el = if (animate) ((clock.longValue - since).coerceAtLeast(0L)) / 1000f else 10f
         val amp = if (animate) amplitude.floatValue.coerceIn(0f, 1f) else 0.2f
-        val base = s * 0.36f
-        val cols = 31
-        val pitch = s * 0.9f / cols
-        val maxDot = pitch * 0.46f
         val accent = palette.red
-        val hot = when (state) {
-            AssistantState.LISTENING -> amp
-            AssistantState.SPEAKING -> 0.35f
-            AssistantState.FAILURE -> 1f
-            else -> 0.0f
+        val fg = palette.fg
+
+        // How the ball behaves in each state: size, ripple strength, ripple speed, turning speed, how hot (accent) it runs.
+        var radius = 0.34f; var ripple = 0.05f; var speed = 1.0f; var spin = 0.35f; var heat = 0f
+        when (state) {
+            AssistantState.IDLE -> { radius = 0.27f + 0.012f * sin(t * 2.0f); ripple = 0.035f; speed = 0.7f; spin = 0.18f }
+            AssistantState.LISTENING -> { radius = 0.31f + 0.05f * amp; ripple = 0.10f + 0.42f * amp; speed = 1.6f + 3f * amp; spin = 0.5f + 0.8f * amp; heat = amp }
+            AssistantState.SPEAKING -> { radius = 0.33f + 0.025f * sin(t * 6.5f); ripple = 0.17f; speed = 2.2f; spin = 0.6f; heat = 0.35f }
+            AssistantState.RECOGNIZING -> { radius = 0.32f; ripple = 0.13f; speed = 2.4f; spin = 1.5f; heat = 0.25f }
+            AssistantState.THINKING -> { radius = 0.31f; ripple = 0.16f; speed = 1.8f; spin = -1.2f; heat = 0.2f }
+            AssistantState.EXECUTING -> { radius = 0.32f; ripple = 0.08f; speed = 3.0f; spin = 2.2f; heat = 0.3f }
+            AssistantState.CONFIRMING -> { radius = 0.30f; ripple = 0.05f; speed = 1.0f; spin = 0.3f }
+            AssistantState.SUCCESS -> { val k = (el / 0.45f).coerceIn(0f, 1f); radius = 0.30f + 0.12f * (1f - (1f - k) * (1f - k)) * (1f - 0.55f * (el / 1.3f).coerceIn(0f, 1f)); ripple = 0.03f; speed = 1.0f; spin = 0.5f; heat = 0.1f }
+            AssistantState.FAILURE -> { radius = 0.31f; ripple = 0.10f * (1f - (el / 0.9f).coerceIn(0f, 1f)); speed = 14f; spin = 0.2f; heat = 1f }
         }
-        for (iy in 0 until cols) for (ix in 0 until cols) {
-            val x = (ix - (cols - 1) / 2f) * pitch
-            val y = (iy - (cols - 1) / 2f) * pitch
-            val rho = sqrt(x * x + y * y)
-            val th = atan2(y, x)
-            // outline radius for this angle
-            var rad = base
-            var spin = 0f
-            when (state) {
-                AssistantState.IDLE -> rad = base * (0.34f + 0.025f * sin(t * 2.2f)) + 0f
-                AssistantState.LISTENING -> {
-                    val k = 0.10f + 0.5f * amp
-                    rad = base * (0.62f + 0.10f * amp) * (1f + k * (0.5f * sin(3 * th + t * 3.1f) + 0.35f * sin(5 * th - t * 2.3f) + 0.25f * sin(2 * th + t * 1.7f)))
+        val base = s * radius
+        val persp = 2.6f
+
+        // soft glow under the ball
+        drawCircle(
+            Brush.radialGradient(listOf(accent.copy(alpha = (0.10f + 0.30f * heat) * (if (palette.isDark) 1f else 0.7f)), Color.Transparent), center = c, radius = base * 2.3f),
+            base * 2.3f, c
+        )
+
+        val ay = t * spin
+        val ax = 0.45f * sin(t * 0.5f) + 0.25f
+        val cy = cos(ay); val sy = sin(ay); val cx = cos(ax); val sx = sin(ax)
+        val maxDot = s * 0.0155f
+        val lx = -0.45f; val ly = -0.55f; val lz = 0.70f
+        val tt = t * speed
+
+        // Two passes: far side first, then near side over it.
+        for (pass in 0..1) {
+            for (i in pts.x.indices) {
+                val px = pts.x[i]; val py = pts.y[i]; val pz = pts.z[i]
+                // liquid skin: three crossing waves
+                val w = sin(px * 3.1f + tt * 1.3f) * sin(py * 2.7f - tt * 1.1f) + 0.6f * sin(pz * 3.9f + py * 2.1f + tt * 1.7f) + 0.4f * sin(px * 5.3f - pz * 4.1f - tt * 2.3f)
+                val rr = 1f + ripple * w * 0.55f
+                // rotate around Y, then X
+                val x1 = px * cy + pz * sy
+                val z1 = -px * sy + pz * cy
+                val y2 = py * cx - z1 * sx
+                val z2 = py * sx + z1 * cx
+                val front = z2 >= 0f
+                if ((pass == 1) != front) continue
+                val k = persp / (persp - z2 * 0.5f * rr)
+                val sxp = x1 * rr * base * k
+                val syp = y2 * rr * base * k
+                // lighting from the normal (the unrotated direction, rotated)
+                val light = (x1 * lx + y2 * ly + z2 * lz).coerceIn(-1f, 1f) * 0.5f + 0.5f
+                val depth = 0.5f + 0.5f * z2
+                var a = (0.10f + 0.90f * depth * depth) * (0.30f + 0.70f * light)
+                var sz = maxDot * (0.28f + 0.72f * depth) * k * (0.85f + 0.3f * light)
+                var col: Color = fg
+                var hot = (heat * (0.5f + 0.5f * w).coerceIn(0f, 1f))
+                // sweep of light across the ball while it thinks or listens to the words
+                if (state == AssistantState.THINKING || state == AssistantState.RECOGNIZING) {
+                    val band = exp(-(((y2 + 1f) % 2f - ((tt * 0.55f) % 2f)).let { it * it }) * 9f)
+                    a = (a + 0.55f * band).coerceAtMost(1f)
+                    sz *= 1f + 0.6f * band
+                    hot = maxOf(hot, band * 0.8f)
                 }
-                AssistantState.SPEAKING -> {
-                    val pulse = 0.5f + 0.5f * sin(t * 6.5f)
-                    rad = base * (0.66f + 0.07f * pulse) * (1f + 0.12f * sin(4 * th + t * 2.6f) + 0.07f * sin(2 * th - t * 1.9f))
+                if (state == AssistantState.FAILURE) hot = 0.9f
+                if (hot > 0.01f) col = lerp(fg, accent, hot.coerceIn(0f, 1f))
+                // specular highlight: the brightest dots near the light, white
+                val spec = ((light - 0.82f) / 0.18f).coerceIn(0f, 1f)
+                if (spec > 0f && front) { a = (a + 0.5f * spec).coerceAtMost(1f); sz *= 1f + 0.25f * spec }
+                drawCircle(col.copy(alpha = a.coerceIn(0f, 1f)), sz, Offset(c.x + sxp, c.y + syp))
+            }
+            // the working state: an orbit of dots around the equator, passing in front of and behind the ball
+            if (state == AssistantState.EXECUTING) {
+                for (a0 in ring) {
+                    val ang = a0 + t * 2.4f
+                    val ox = cos(ang); val oz = sin(ang)
+                    val tilt = 0.35f
+                    val oy = oz * sin(tilt); val ozz = oz * cos(tilt)
+                    val front = ozz >= 0f
+                    if ((pass == 1) != front) continue
+                    val rad = base * 1.32f
+                    drawCircle(accent.copy(alpha = if (front) 0.95f else 0.35f), maxDot * (if (front) 0.8f else 0.5f), Offset(c.x + ox * rad, c.y + oy * rad))
                 }
-                AssistantState.RECOGNIZING -> { rad = base * 0.66f * (1f + 0.10f * sin(3 * th + t * 5f)); spin = t * 1.4f }
-                AssistantState.THINKING -> { rad = base * 0.62f * (1f + 0.14f * sin(2 * th - t * 3.4f) + 0.06f * sin(5 * th + t * 2f)); spin = -t * 1.1f }
-                AssistantState.EXECUTING -> rad = base * 0.70f * (1f + 0.05f * sin(6 * th + t * 4f))
-                AssistantState.CONFIRMING -> rad = base * 0.60f * (1f + 0.04f * sin(t * 3f))
-                AssistantState.SUCCESS -> rad = base * (0.6f + 0.5f * (1f - (1f - (el / 0.5f).coerceIn(0f, 1f)).let { it * it })).coerceAtMost(base * 1.1f) * (1f - 0.18f * (el / 1.2f).coerceIn(0f, 1f))
-                AssistantState.FAILURE -> rad = base * 0.64f * (1f + 0.07f * sin(11 * th + t * 30f) * (1f - (el / 0.8f).coerceIn(0f, 1f)))
-            }
-            if (rho > rad) continue
-            val depth = (1f - rho / rad).coerceIn(0f, 1f)
-            var r = maxDot * (0.22f + 0.78f * Math.pow(depth.toDouble(), 0.55).toFloat())
-            // a swirl of brightness around the blob while it thinks, orbit highlight while it works
-            var glow = depth
-            if (state == AssistantState.THINKING || state == AssistantState.RECOGNIZING) {
-                val w = 0.5f + 0.5f * cos(th * 2 - spin * 2.2f)
-                glow = (depth * 0.55f + w * 0.45f * (0.3f + depth))
-                r *= 0.8f + 0.35f * w
-            } else if (state == AssistantState.EXECUTING) {
-                val w = 0.5f + 0.5f * cos(th - t * 4.2f)
-                val ring = 1f - kotlin.math.abs(rho / rad - 0.78f) * 4f
-                glow = if (ring > 0f) (ring * w) else depth * 0.35f
-                r *= if (ring > 0f) 0.7f + 0.5f * w else 0.7f
-            } else if (state == AssistantState.IDLE) {
-                glow = 0.35f + 0.4f * depth
-            }
-            val edge = (1f - depth)
-            val col = lerp(palette.fg.copy(alpha = (0.28f + 0.72f * glow).coerceIn(0f, 1f)), accent, (hot * edge * 1.4f).coerceIn(0f, 1f).let { if (state == AssistantState.FAILURE) 0.85f else it })
-            drawCircle(col, r, c + Offset(x, y))
-        }
-        // faint resting grid so the blob sits on a dot field, like the Nothing glyph matrix
-        if (state == AssistantState.IDLE || state == AssistantState.CONFIRMING) {
-            val g = palette.dim.copy(alpha = 0.25f)
-            for (iy in 0 until cols step 2) for (ix in 0 until cols step 2) {
-                val x = (ix - (cols - 1) / 2f) * pitch
-                val y = (iy - (cols - 1) / 2f) * pitch
-                if (sqrt(x * x + y * y) in (base * 0.45f)..(base * 1.15f)) drawCircle(g, pitch * 0.1f, c + Offset(x, y))
             }
         }
     }
