@@ -120,11 +120,11 @@ class Settings(context: Context) {
         private set
     var language by mutableStateOf(sp.getString("language", "en-IN") ?: "en-IN")
         private set
-    var theme by mutableIntStateOf(sp.getInt("theme", ThemeMode.SYSTEM))
+    var theme by mutableIntStateOf(sp.getInt("theme", ThemeMode.DARK))
         private set
 
     /** Look: 0 plain Nothing, 1 liquid glass, 2 minimal liquid glass. */
-    var glassStyle by mutableIntStateOf(sp.getInt("glass_style", 1))
+    var glassStyle by mutableIntStateOf(sp.getInt("glass_style", 0))
         private set
     /** The listening blob (dot-matrix, Siri-style) instead of the plain ring. */
     var blob by mutableStateOf(sp.getBoolean("blob", true))

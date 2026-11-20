@@ -11,6 +11,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -58,9 +59,10 @@ fun Modifier.glassBackdrop(p: GlyphPalette): Modifier = composed {
             val dark = p.isDark
             fun blob(c: Color, cx: Float, cy: Float, r: Float, al: Float) =
                 drawCircle(Brush.radialGradient(listOf(c.copy(alpha = al), Color.Transparent), center = Offset(cx, cy), radius = r), r, Offset(cx, cy))
-            blob(p.red, w * (0.78f + 0.12f * kotlin.math.sin(a)), h * (0.10f + 0.06f * kotlin.math.cos(a)), w * 0.85f, if (dark) 0.26f else 0.16f)
-            blob(Color(0xFF7AA8FF), w * (0.12f + 0.10f * kotlin.math.cos(a + 1.6f)), h * (0.52f + 0.08f * kotlin.math.sin(a + 1.6f)), w * 0.75f, if (dark) 0.13f else 0.12f)
-            blob(Color.White, w * (0.55f + 0.18f * kotlin.math.sin(a * 2f + 0.8f)), h * (0.88f + 0.05f * kotlin.math.cos(a)), w * 0.7f, if (dark) 0.07f else 0.30f)
+            blob(p.red, w * (0.80f + 0.10f * kotlin.math.sin(a)), h * (0.12f + 0.06f * kotlin.math.cos(a)), w * 0.9f, if (dark) 0.34f else 0.20f)
+            blob(Color(0xFF3B82F6), w * (0.10f + 0.10f * kotlin.math.cos(a + 1.6f)), h * (0.40f + 0.08f * kotlin.math.sin(a + 1.6f)), w * 0.85f, if (dark) 0.30f else 0.18f)
+            blob(Color(0xFF8B5CF6), w * (0.70f + 0.12f * kotlin.math.sin(a + 3.1f)), h * (0.66f + 0.07f * kotlin.math.cos(a + 3.1f)), w * 0.8f, if (dark) 0.26f else 0.16f)
+            blob(Color(0xFF22D3EE), w * (0.30f + 0.14f * kotlin.math.sin(a * 2f + 0.8f)), h * (0.90f + 0.04f * kotlin.math.cos(a)), w * 0.7f, if (dark) 0.18f else 0.14f)
         }
         if (st.isGlass && p.isDark) {
             if (!liquid) drawRect(Brush.radialGradient(listOf(p.red.copy(alpha = if (st.minimal) 0.10f else 0.20f), Color.Transparent), center = Offset(size.width * 0.92f, size.height * 0.04f), radius = size.width * 0.9f))
@@ -87,14 +89,26 @@ fun Modifier.glassFill(p: GlyphPalette, shape: androidx.compose.ui.graphics.Shap
         val bot = if (p.isDark) Color.White.copy(alpha = 0.025f) else Color.White.copy(alpha = 0.45f)
         val rim = if (p.isDark) Color.White.copy(alpha = if (st.glass == 1) 0.48f else 0.30f) else Color.White.copy(alpha = 0.9f)
         val liquid = st.glass == 1
+        if (liquid) {
+            // iOS-style liquid glass: a clear, slightly milky body, a bright edge that catches light on two opposite corners,
+            // a soft inner glow just inside the edge, and a faint shadow so the pane floats.
+            val d = p.isDark
+            val body = Brush.linearGradient(listOf(Color.White.copy(alpha = if (d) 0.20f else 0.55f), Color.White.copy(alpha = if (d) 0.07f else 0.28f), Color.White.copy(alpha = if (d) 0.13f else 0.40f)))
+            val edge = Brush.linearGradient(
+                0f to Color.White.copy(alpha = if (d) 0.85f else 1f),
+                0.28f to Color.White.copy(alpha = 0.10f),
+                0.62f to Color.White.copy(alpha = 0.06f),
+                1f to Color.White.copy(alpha = if (d) 0.60f else 0.95f)
+            )
+            val inner = Brush.linearGradient(listOf(Color.White.copy(alpha = if (d) 0.22f else 0.5f), Color.Transparent, Color.White.copy(alpha = if (d) 0.12f else 0.3f)))
+            return@composed this
+                .shadow(14.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.35f), spotColor = Color.Black.copy(alpha = 0.35f))
+                .background(body, shape)
+                .border(androidx.compose.foundation.BorderStroke(3.dp, inner), shape)
+                .border(androidx.compose.foundation.BorderStroke(1.2.dp, edge), shape)
+        }
         val base = this.background(Brush.verticalGradient(listOf(top, bot)), shape)
-        val sheened = if (!liquid) base else base
-            .background(Brush.linearGradient(
-                0f to Color.White.copy(alpha = if (p.isDark) 0.16f else 0.55f),
-                0.22f to Color.White.copy(alpha = if (p.isDark) 0.04f else 0.15f),
-                0.5f to Color.Transparent,
-                0.86f to p.red.copy(alpha = if (p.isDark) 0.07f else 0.05f),
-                1f to Color.White.copy(alpha = if (p.isDark) 0.06f else 0.25f)), shape)
+        val sheened = base
         sheened
             .border(androidx.compose.foundation.BorderStroke(1.dp, Brush.linearGradient(listOf(rim, Color.White.copy(alpha = 0.03f), p.red.copy(alpha = if (p.isDark) 0.16f else 0.10f)))), shape)
     }

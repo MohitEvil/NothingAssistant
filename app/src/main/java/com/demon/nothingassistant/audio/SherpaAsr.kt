@@ -23,9 +23,9 @@ import kotlin.math.sqrt
 
 /** The models the on-device recogniser can use. Downloaded once, then fully offline. */
 enum class AsrModel(val id: String, val title: String, val size: String, val url: String, val folder: String) {
-    LIVE("live", "Live speech (streaming)", "about 45 MB",
+    LIVE("live", "Live speech (streaming, beta)", "about 45 MB",
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17.tar.bz2", "zipformer-live"),
-    ACCURATE("accurate", "Accurate speech (Moonshine)", "about 30 MB",
+    ACCURATE("accurate", "Accurate speech (Moonshine, beta)", "about 30 MB",
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2", "moonshine-tiny"),
     VAD("vad", "Voice activity detector", "about 2 MB",
         "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx", "silero-vad")
@@ -130,6 +130,8 @@ class SherpaAsr(private val context: Context) {
         val all = dir(m).walkTopDown().filter { it.isFile }.toList()
         val ext = if (prefix == "tokens") ".txt" else ".onnx"
         val c = all.filter { it.name.startsWith(prefix) && it.name.endsWith(ext) }
+        // The decoder of a transducer is tiny and loses a lot of accuracy when quantised, so it must stay full precision.
+        if (prefix == "decoder") return c.firstOrNull { !it.name.contains("int8") } ?: c.firstOrNull()
         return c.firstOrNull { it.name.contains("int8") } ?: c.firstOrNull()
     }
 
@@ -211,6 +213,7 @@ class SherpaAsr(private val context: Context) {
         var lastText = ""
         var elapsed = 0
         var noise = 0.01f
+        var agc = 0f
         val started = System.currentTimeMillis()
         var vadLeft = FloatArray(0)
         try {
@@ -219,6 +222,12 @@ class SherpaAsr(private val context: Context) {
                 val n = ar.read(shorts, 0, shorts.size)
                 if (n <= 0) continue
                 val f = FloatArray(n) { shorts[it] / 32768f }
+                var peak = 0f
+                for (v in f) { val a = if (v < 0) -v else v; if (a > peak) peak = a }
+                // Quiet microphones: bring the level up so the model sees a normal speech signal.
+                agc = maxOf(agc * 0.995f, peak)
+                val gain = if (agc in 0.0005f..0.2f) (0.3f / agc).coerceAtMost(8f) else 1f
+                if (gain > 1.05f) for (k in f.indices) f[k] = (f[k] * gain).coerceIn(-1f, 1f)
                 var sum = 0f
                 for (v in f) sum += v * v
                 val rms = sqrt(sum / n)
@@ -280,6 +289,7 @@ class SherpaAsr(private val context: Context) {
             }.onFailure { AppLog.e("asr", "moonshine pass failed", it) }
         }
         val out = text.trim()
+        AppLog.d("asr", "mode=$mode samples=$count heard='$out'")
         post(my) { if (out.isBlank()) l.onError(7) else l.onFinal(out) }
     }
 

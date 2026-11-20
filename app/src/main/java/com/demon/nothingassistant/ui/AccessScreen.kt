@@ -179,6 +179,8 @@ fun AccessScreen(
             },
             modifier = Modifier.fillMaxWidth()
         )
+        Spacer(Modifier.height(6.dp))
+        Text("Android restarts an app when some permissions change. If that happens, open the app again and it carries on where it stopped.", color = palette.muted, fontSize = 11.sp)
         if (grantMsg.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(grantMsg, color = palette.muted, fontSize = 12.sp) }
         Spacer(Modifier.height(16.dp))
         AdvancedAccessCard(settings, palette)

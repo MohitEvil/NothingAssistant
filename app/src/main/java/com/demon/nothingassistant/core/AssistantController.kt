@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Single source of truth for assistant state.
@@ -602,17 +603,24 @@ class AssistantController(private val context: Context, val settings: Settings) 
             return
         }
         val casual = com.demon.nothingassistant.ai.Banter.isCasual(text)
+        var kbRef: String? = null
         if (!brain.configured() || casual) {
             val acted = com.demon.nothingassistant.action.Blackboard.status("what did you just do") != null
             com.demon.nothingassistant.ai.Banter.reply(text, history.lastReply(), history.lastChatQuestion(), acted)?.let {
                 remember(text, it); respond(text, it); return
             }
         }
+        // PyBot's offline question-and-answer knowledge: instant, no network, and only when the match is solid.
+        if (!casual) {
+            val kb = withContext(Dispatchers.Default) { runCatching { com.demon.nothingassistant.ai.PyKb.answer(text) }.getOrNull() }
+            if (kb != null && !brain.configured()) { remember(text, kb); respond(text, kb); return }
+            kbRef = kb
+        }
         if (brain.configured()) {
             transition(AssistantState.THINKING, "Thinking…", text)
             // Fresh facts from the web, boiled down to a few sentences, so the AI answers from them instead of guessing.
             val factual = question || Regex("^(?:who|what|when|where|which|how (?:many|much|old|far|tall|long)|is|are|does|did|was|were)\\b", RegexOption.IGNORE_CASE).containsMatchIn(t)
-            val ref = if (factual && t.split(Regex("\\s+")).size >= 3)
+            val ref = if (kbRef != null) kbRef else if (factual && t.split(Regex("\\s+")).size >= 3)
                 runCatching { kotlinx.coroutines.withTimeoutOrNull(3500) { com.demon.nothingassistant.action.WebInfo.answer(text, history.lastChatQuestion()) } }.getOrNull() else null
             val chatty = "You are a warm, friendly voice assistant on the user's phone. Reply like a person in one or two short sentences, match the user's tone and language, no markdown, no lectures. For casual talk just chat naturally."
             val sys = if (casual) chatty else if (ref != null) "You are a voice assistant. Answer in at most two short sentences, no markdown. Use this web summary if it helps and say nothing about it being a summary: $ref" else null

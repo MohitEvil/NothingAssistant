@@ -184,3 +184,11 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 ## Chat memory (ideas from PyBot, written in Kotlin)
 - Remembers what you tell it on the phone only: "my favourite colour is blue", "I live in Pune", "I work as a nurse", things you like and hate. Ask "what's my favourite colour", "where do I live", "what do you know about me"; "forget what I told you" clears it.
 - A hello in the middle of a chat is a check-in, not a fresh good-morning.
+
+## Latest fixes
+- Auto-grant now runs one permission at a time and writes progress down first, so an app restart caused by a permission change can't loop. The default assistant is no longer set at start-up, only when you ask.
+- Offline answers from PyBot's knowledge (about 6,200 everyday questions) come before web search. PyBot is Apache-2.0.
+- Blob: finer dots, much slower wave-like motion, smaller ripples.
+- Default look for new installs: Dark, Nothing style, Red accent.
+- Liquid Glass reworked to feel like iOS: clear body, bright edge on two corners, inner glow, floating shadow, colour blobs drifting behind.
+- Speech: on-device decoder kept at full precision, quiet-mic gain, logging of what was heard. Marked beta.

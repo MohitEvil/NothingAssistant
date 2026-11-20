@@ -19,6 +19,7 @@ class NothingApp : Application() {
         com.demon.nothingassistant.agent.Skills.init(this)
         com.demon.nothingassistant.audio.Cue.recover(this)
         com.demon.nothingassistant.ai.Banter.init(this)
+        com.demon.nothingassistant.ai.PyKb.init(this)
         settings = Settings(this)
         com.demon.nothingassistant.priv.Priv.preference = { settings.privMode }
         controller = AssistantController(this, settings)
