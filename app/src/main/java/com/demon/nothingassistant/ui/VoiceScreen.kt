@@ -85,11 +85,7 @@ fun VoiceScreen(
 
         Spacer(Modifier.height(20.dp))
         SectionLabel("SPEECH RECOGNITION", palette)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf("EN-IN" to "en-IN", "EN-US" to "en-US", "HI-IN" to "hi-IN").forEach { (name, tag) ->
-                Chip(name, settings.language == tag, palette) { settings.setLanguage(tag) }
-            }
-        }
+        SpeechStatus(settings, palette)
         Spacer(Modifier.height(12.dp))
         Card(palette) {
             ToggleRow("Prefer offline speech", "Uses the on-device model when installed", settings.preferOffline, palette) { settings.setPreferOffline(it) }

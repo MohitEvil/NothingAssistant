@@ -155,7 +155,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         5, 10, 11 -> "The speech service dropped. Tap the glyph to try again."
         12, 13 -> "That language isn't available offline. Pick another in Settings."
         SpeechEngine.ERROR_UNAVAILABLE -> "No speech recognition service found on this phone. Download an on-device speech model in Voice settings."
-        SpeechEngine.ERROR_NOMODEL -> "This phone has no Google speech, so I'm downloading my own speech model now. Try again in a minute. Progress is in Voice settings."
+        SpeechEngine.ERROR_NOMODEL -> "I can't find a speech recogniser on this phone. Open Voice settings: I'll walk you through installing Google's, or you can download my offline one."
         SpeechEngine.ERROR_ENGINE -> "The on-device speech engine couldn't start. Try another engine in Voice settings."
         else -> "Speech error ($code). Tap to try again."
     }

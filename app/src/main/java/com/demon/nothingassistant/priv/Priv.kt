@@ -110,10 +110,13 @@ object Priv {
             val reader = Thread { runCatching { outText.append(process.inputStream.bufferedReader().readText()) } }.apply { start() }
             val errText = StringBuilder()
             val reader2 = Thread { runCatching { errText.append(process.errorStream.bufferedReader().readText()) } }.apply { start() }
-            val done = process.waitFor(timeoutSec, TimeUnit.SECONDS)
-            if (!done) { process.destroy(); return@withContext Out(false, "Timed out.", -2) }
+            // Shizuku's remote process throws "hasn't exited" from exitValue() after a timed waitFor, so wait on a worker thread with plain waitFor().
+            var code = -1
+            var finished = false
+            val waiter = Thread { runCatching { code = process.waitFor(); finished = true } }.apply { isDaemon = true; start() }
+            waiter.join(timeoutSec * 1000)
+            if (!finished) { runCatching { process.destroy() }; return@withContext Out(false, "Timed out.", -2) }
             reader.join(500); reader2.join(500)
-            val code = process.exitValue()
             val text = (outText.toString() + errText.toString()).trim()
             Out(code == 0, text, code)
         } catch (e: Throwable) {

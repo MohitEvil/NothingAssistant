@@ -64,8 +64,6 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
                 vosk.start(languageTag, listener)
                 return
             }
-            // No model yet: fetch the one for the chosen language, then ask to try again.
-            vosk.download(VoskLang.forTag(languageTag))
             if (!systemOk || choice != "auto") { usingDevice = false; listener.onError(ERROR_NOMODEL); return }
         }
         usingDevice = false

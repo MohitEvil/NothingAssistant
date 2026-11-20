@@ -198,3 +198,8 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Speech: the sherpa recogniser is gone. Vosk offline recognition replaces it (English India/US, Hindi; about 40 MB each, download in Voice settings). Auto uses Google speech when the ROM has it, else Vosk.
 - Liquid Glass is now real frosted glass: the background is blurred live and each pane shows its own patch of it, with a smoked/frosted tint, bright top edge and soft shadow. Needs Android 12+ for the blur; older phones get the tint without blur.
 - PyBot knowledge grew to about 7,400 answers.
+
+## Round 4
+- Speech: the app asks the phone's recogniser which languages it supports (Google if present) and sets en-US, else the phone language, else the first available, until you pick one. Voice settings shows what was detected, or walks you through installing Google's recogniser (Play Store page, Voice input settings, refresh). Vosk stays optional.
+- Liquid Glass now uses the Haze library: the background lives in its own layer behind each screen and every pane blurs it live.
+- Permission grants: fixed the Shizuku "process hasn't exited" error that made every grant step report failure.

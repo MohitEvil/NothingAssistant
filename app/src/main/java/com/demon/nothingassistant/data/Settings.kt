@@ -118,7 +118,11 @@ class Settings(context: Context) {
     /** Grant every permission automatically when Shizuku or root is available. */
     var autoGrant by mutableStateOf(sp.getBoolean("auto_grant", true))
         private set
-    var language by mutableStateOf(sp.getString("language", "en-IN") ?: "en-IN")
+    var language by mutableStateOf(sp.getString("language", "en-US") ?: "en-US")
+    /** True once the person has picked a speech language themselves; until then the detected default is used. */
+    var langChosen by mutableStateOf(sp.getBoolean("lang_chosen", false))
+    /** Languages the phone's speech recogniser says it supports. */
+    var supportedLangs by mutableStateOf((sp.getStringSet("asr_langs", emptySet()) ?: emptySet()).toList().sorted())
         private set
     var theme by mutableIntStateOf(sp.getInt("theme", ThemeMode.DARK))
         private set
@@ -287,7 +291,11 @@ class Settings(context: Context) {
     @JvmName("applyPreferOffline")
     fun setPreferOffline(v: Boolean) { preferOffline = v; sp.edit().putBoolean("prefer_offline", v).apply() }
     @JvmName("applyLanguage")
-    fun setLanguage(v: String) { language = v; sp.edit().putString("language", v).apply() }
+    fun setLanguage(v: String) { language = v; langChosen = true; sp.edit().putString("language", v).putBoolean("lang_chosen", true).apply() }
+    @JvmName("applyLanguageAuto")
+    fun setLanguageAuto(v: String) { language = v; sp.edit().putString("language", v).apply() }
+    @JvmName("applySupportedLangs")
+    fun setSupportedLangs(v: List<String>) { supportedLangs = v.sorted(); sp.edit().putStringSet("asr_langs", v.toSet()).apply() }
     @JvmName("applyTheme")
     fun setTheme(v: Int) { theme = v; sp.edit().putInt("theme", v).apply() }
     @JvmName("applyGlassStyle")

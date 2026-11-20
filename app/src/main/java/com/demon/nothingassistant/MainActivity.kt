@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         autoStart = shouldAutoStart(intent)
 
-        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing), com.demon.nothingassistant.ui.LocalGlassBackdrop provides androidx.compose.runtime.remember { com.demon.nothingassistant.ui.GlassBackdropHolder() }) { Root() } }
+        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing)) { Root() } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -185,6 +185,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        com.demon.nothingassistant.ui.GlassRoot(palette) {
         if (showLog) {
             LogScreen(palette = palette, onClose = { showLog = false })
         } else if (showAppearance) {
@@ -298,6 +299,7 @@ class MainActivity : ComponentActivity() {
                 onDismissConfirm = controller::dismissPending,
                 onOpenSettings = { showSettings = true }
             )
+        }
         }
     }
 }

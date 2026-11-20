@@ -23,6 +23,7 @@ class NothingApp : Application() {
         settings = Settings(this)
         com.demon.nothingassistant.priv.Priv.preference = { settings.privMode }
         controller = AssistantController(this, settings)
+        android.os.Handler(mainLooper).postDelayed({ com.demon.nothingassistant.audio.SpeechInfo.autoConfigure(this, settings) }, 1500)
         if (settings.autoGrant) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default).launch {
             com.demon.nothingassistant.priv.AutoGrant.runOnce(this@NothingApp)
         }

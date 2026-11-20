@@ -74,4 +74,6 @@ dependencies {
     // Offline speech recognition for ROMs without Google speech (Indian English, Hindi). Vosk needs JNA as an AAR.
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.47")
+    // Live background blur for the Liquid Glass look.
+    implementation("dev.chrisbanes.haze:haze:1.2.0")
 }
