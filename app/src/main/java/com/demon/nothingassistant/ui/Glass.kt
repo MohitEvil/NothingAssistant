@@ -1,5 +1,14 @@
 package com.demon.nothingassistant.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -51,14 +60,6 @@ fun Modifier.squish(enabled: Boolean = true, onClick: () -> Unit): Modifier = co
         .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
 }
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.CompositionLocalProvider
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.HazeStyle
-import dev.chrisbanes.haze.HazeTint
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
 /** The live blur state every frosted pane reads. Null where nothing can be blurred (plain looks, and the panel that floats over other apps). */
 val LocalHazeState = compositionLocalOf<HazeState?> { null }
 
@@ -100,7 +101,7 @@ private fun DrawScope.paintBackdrop(p: GlyphPalette, st: UiStyle, driftValue: Fl
 fun GlassRoot(palette: GlyphPalette, content: @Composable () -> Unit) {
     val st = LocalUiStyle.current
     if (st.glass != 1) { content(); return }
-    val hazeState = remember { HazeState() }
+    val hazeState = rememberHazeState()
     val drift = rememberInfiniteTransition(label = "liquid").animateFloat(0f, 1f, infiniteRepeatable(tween(16000, easing = LinearEasing), RepeatMode.Restart), label = "drift")
     CompositionLocalProvider(LocalHazeState provides hazeState) {
         Box(Modifier.fillMaxSize()) {
@@ -133,7 +134,7 @@ fun Modifier.glassFill(p: GlyphPalette, shape: androidx.compose.ui.graphics.Shap
         val base = this
             .shadow(14.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.30f), spotColor = Color.Black.copy(alpha = 0.30f))
             .clip(shape)
-        val blurred = if (hz != null) base.hazeEffect(hz, HazeStyle(tint = HazeTint(tint), blurRadius = 24.dp, noiseFactor = 0.04f)) else base.background(tint, shape)
+        val blurred = if (hz != null) base.hazeEffect(state = hz, style = HazeStyle(tint = HazeTint(tint), blurRadius = 24.dp, noiseFactor = 0.04f)) else base.background(tint, shape)
         blurred
             .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = if (d) 0.10f else 0.35f), Color.Transparent)), shape)
             .border(androidx.compose.foundation.BorderStroke(1.dp, edge), shape)
