@@ -133,7 +133,7 @@ fun Modifier.glassFill(p: GlyphPalette, shape: androidx.compose.ui.graphics.Shap
         val base = this
             .shadow(14.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.30f), spotColor = Color.Black.copy(alpha = 0.30f))
             .clip(shape)
-        val blurred = if (hz != null) base.hazeEffect(state = hz, style = HazeStyle(tint = HazeTint(tint), blurRadius = 24.dp, noiseFactor = 0.04f)) else base.background(tint, shape)
+        val blurred = if (hz != null) base.hazeEffect(state = hz, style = HazeStyle(backgroundColor = if (d) Color(0xFF101012) else Color(0xFFF2F2F7), tint = HazeTint(tint), blurRadius = 24.dp, noiseFactor = 0.04f)) else base.background(tint, shape)
         blurred
             .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = if (d) 0.10f else 0.35f), Color.Transparent)), shape)
             .border(androidx.compose.foundation.BorderStroke(1.dp, edge), shape)
