@@ -182,6 +182,7 @@ class Settings(context: Context) {
     /** Name of the phone's own voice to use ("" = automatic, by language). */
     var deviceVoice by mutableStateOf(sp.getString("device_voice", "") ?: "")
         private set
+    @JvmName("applyDeviceVoice")
     fun setDeviceVoice(name: String) { deviceVoice = name; sp.edit().putString("device_voice", name).apply() }
 
     // AI voice (cloud text-to-speech), off by default
