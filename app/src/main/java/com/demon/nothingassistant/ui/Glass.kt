@@ -8,7 +8,6 @@ import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
-import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -101,7 +100,7 @@ private fun DrawScope.paintBackdrop(p: GlyphPalette, st: UiStyle, driftValue: Fl
 fun GlassRoot(palette: GlyphPalette, content: @Composable () -> Unit) {
     val st = LocalUiStyle.current
     if (st.glass != 1) { content(); return }
-    val hazeState = rememberHazeState()
+    val hazeState = remember { HazeState() }
     val drift = rememberInfiniteTransition(label = "liquid").animateFloat(0f, 1f, infiniteRepeatable(tween(16000, easing = LinearEasing), RepeatMode.Restart), label = "drift")
     CompositionLocalProvider(LocalHazeState provides hazeState) {
         Box(Modifier.fillMaxSize()) {
