@@ -74,6 +74,9 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
         neural.load(model, manager.dirFor(model))
     }
 
+    fun deviceVoices() = system.deviceVoices()
+    fun previewDeviceVoice(name: String) { neural.stop(); system.preview(name) }
+
     fun useDeviceVoice() {
         settings.setVoiceEngine("system")
         neural.stop()

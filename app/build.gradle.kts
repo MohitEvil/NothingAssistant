@@ -76,4 +76,6 @@ dependencies {
     implementation("com.alphacephei:vosk-android:0.3.47")
     // Live background blur for the Liquid Glass look.
     implementation("dev.chrisbanes.haze:haze:1.2.0")
+    // Edge online voices (WebSocket) and the free AI gateway
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

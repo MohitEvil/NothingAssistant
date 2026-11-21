@@ -58,6 +58,57 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private val brain = Brain(settings)
     private val planner = com.demon.nothingassistant.agent.Planner(context, brain)
 
+    // ---- Live mode: a hands-free spoken conversation that keeps listening after every answer ----
+    class LiveLine(val user: Boolean, val text: String)
+    val liveLog = androidx.compose.runtime.mutableStateListOf<LiveLine>()
+    private val liveOn = androidx.compose.runtime.mutableStateOf(false)
+    private val livePause = androidx.compose.runtime.mutableStateOf(false)
+    val live: Boolean get() = liveOn.value
+    val livePaused: Boolean get() = livePause.value
+    private var liveFails = 0
+
+    private fun liveAdd(user: Boolean, text: String) {
+        val t = text.trim()
+        if (!liveOn.value || t.isEmpty()) return
+        val last = liveLog.lastOrNull()
+        if (last != null && last.user == user && last.text == t) return
+        liveLog.add(LiveLine(user, t))
+        while (liveLog.size > 80) liveLog.removeAt(0)
+    }
+
+    fun startLive() {
+        if (!hasMicPermission()) return
+        liveOn.value = true; livePause.value = false; liveFails = 0; liveLog.clear()
+        inSession = true
+        beginListening(Mode.FOLLOWUP)
+    }
+
+    fun stopLive() {
+        liveOn.value = false; livePause.value = false
+        cancel()
+    }
+
+    fun liveResume() {
+        if (!liveOn.value || !hasMicPermission()) return
+        livePause.value = false; liveFails = 0; inSession = true
+        beginListening(Mode.FOLLOWUP)
+    }
+
+    fun livePauseNow() {
+        if (!liveOn.value) return
+        livePause.value = true
+        cancel()
+    }
+
+    /** Text typed in Live mode goes through exactly the same brain as speech. */
+    fun liveSend(text: String) {
+        val t = text.trim()
+        if (t.isEmpty() || !liveOn.value) return
+        silenceInput()
+        livePause.value = false; inSession = true
+        process(t)
+    }
+
     /** True while the window stays open between tasks (the "stay open" setting). */
     private var inSession = false
     private var sessionBlank = 0
@@ -307,6 +358,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     // ---- Understanding and doing ----
 
     private fun process(raw: String) {
+        liveAdd(true, raw)
+        liveFails = 0
         val awaiting = awaitingMore
         awaitingMore = false
         // Dictating a notification reply: "ok" or "thanks" may be the reply itself, never an exit.
@@ -662,7 +715,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private fun afterReply() {
         lastActive = SystemClock.uptimeMillis()
-        if ((settings.followUp || settings.stayOpen) && hasMicPermission()) {
+        if ((settings.followUp || settings.stayOpen || liveOn.value) && hasMicPermission()) {
             speakJob = scope.launch {
                 delay(250)
                 beginListening(Mode.FOLLOWUP)
@@ -677,6 +730,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     /** No spoken follow-up needed: the conversation just ends and the screen closes. */
     private fun endQuiet() {
+        if (liveOn.value && !livePause.value && hasMicPermission()) { beginListening(Mode.FOLLOWUP); return }
         flow++
         lastActive = SystemClock.uptimeMillis()
         transition(AssistantState.IDLE, "", "")
@@ -769,7 +823,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         val token = ++flow
         transition(AssistantState.SUCCESS, message, transcript)
         haptics.success()
-        if (settings.stayOpen && hasMicPermission()) {
+        if ((settings.stayOpen || liveOn.value) && hasMicPermission()) {
             // Say what was done, then keep the window open and wait for the next task.
             say(message) { if (token == flow) continueSession() }
             return
@@ -877,7 +931,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
             }
             val s = _ui.value.state
             if (s == AssistantState.SUCCESS || s == AssistantState.FAILURE) {
-                transition(AssistantState.IDLE, "", "")
+                if (liveOn.value && !livePause.value && hasMicPermission() && !(s == AssistantState.FAILURE && ++liveFails >= 3)) {
+                    beginListening(Mode.FOLLOWUP) // live mode: straight back to listening
+                } else {
+                    transition(AssistantState.IDLE, "", "")
+                }
             }
         }
     }
@@ -904,7 +962,15 @@ class AssistantController(private val context: Context, val settings: Settings) 
         reply: String = "",
         micOpen: Boolean = false
     ) {
-        if (state == AssistantState.IDLE) { inSession = false; sessionBlank = 0 }
+        if (state == AssistantState.IDLE) { inSession = false; sessionBlank = 0; if (liveOn.value) livePause.value = true }
+        if (liveOn.value) {
+            when (state) {
+                AssistantState.SPEAKING -> liveAdd(false, reply)
+                AssistantState.SUCCESS -> liveAdd(false, status)
+                AssistantState.FAILURE -> if (transcript.isNotBlank()) liveAdd(false, status)
+                else -> Unit
+            }
+        }
         _ui.update {
             UiState(
                 state = state,

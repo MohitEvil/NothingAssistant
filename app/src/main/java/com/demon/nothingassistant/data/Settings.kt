@@ -29,7 +29,10 @@ data class Provider(
     val extra: String = ""
 ) {
     /** Has everything needed to make a request. Providers that aren't ready are skipped. */
-    val ready: Boolean get() = key.isNotBlank() && model.isNotBlank() && baseUrl.isNotBlank()
+    val ready: Boolean get() = (key.isNotBlank() || keyless) && model.isNotBlank() && baseUrl.isNotBlank()
+
+    /** Free services that need no account or key (Kilo's free gateway, Pollinations, Edge voices). */
+    val keyless: Boolean get() = baseUrl.startsWith("edge://") || baseUrl.contains("api.kilo.ai") || baseUrl.contains("text.pollinations.ai")
 }
 
 /** Ready-made settings for popular AI providers. All but Anthropic speak the OpenAI chat format. */
@@ -42,6 +45,7 @@ object AiPresets {
         Preset("openrouter", "OPENROUTER", "https://openrouter.ai/api/v1", "openrouter/auto"),
         Preset("openai", "OPENAI", "https://api.openai.com/v1", "gpt-4o-mini"),
         Preset("anthropic", "ANTHROPIC", "https://api.anthropic.com/v1", "claude-haiku-5-5"),
+        Preset("kilo", "KILO FREE", "https://api.kilo.ai/api/gateway", "kilo-auto/free"),
         Preset("custom", "CUSTOM", "", "")
     )
 
@@ -56,7 +60,8 @@ object VoicePresets {
         Preset("v_openai", "OPENAI", "https://api.openai.com/v1", "gpt-4o-mini-tts", "alloy"),
         Preset("v_groq", "GROQ", "https://api.groq.com/openai/v1", "canopylabs/orpheus-v1-english", "hannah"),
         Preset("v_google", "GOOGLE", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash-preview-tts", "Kore"),
-        Preset("v_eleven", "ELEVENLABS", "https://api.elevenlabs.io/v1", "eleven_flash_v2_5", "21m00Tcm4TlvDq8ikWAM")
+        Preset("v_eleven", "ELEVENLABS", "https://api.elevenlabs.io/v1", "eleven_flash_v2_5", "21m00Tcm4TlvDq8ikWAM"),
+        Preset("v_edge", "EDGE FREE", "edge://tts", "edge", "en-US-AriaNeural")
     )
 }
 
@@ -174,6 +179,10 @@ class Settings(context: Context) {
         private set
     var voiceSpeed by mutableStateOf(sp.getFloat("voice_speed", 1.15f))
         private set
+    /** Name of the phone's own voice to use ("" = automatic, by language). */
+    var deviceVoice by mutableStateOf(sp.getString("device_voice", "") ?: "")
+        private set
+    fun setDeviceVoice(name: String) { deviceVoice = name; sp.edit().putString("device_voice", name).apply() }
 
     // AI voice (cloud text-to-speech), off by default
     var aiVoiceEnabled by mutableStateOf(sp.getBoolean("ai_voice_enabled", false))
@@ -239,6 +248,26 @@ class Settings(context: Context) {
         if (i < 0) return
         voiceProviders[i] = change(voiceProviders[i])
         persistVoiceProviders()
+    }
+
+    /** Puts a provider first in the voice list, makes sure it has a voice, and turns AI voice on. */
+    fun preferVoiceProvider(id: String) {
+        val i = voiceProviders.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val p = voiceProviders.removeAt(i)
+        voiceProviders.add(0, p)
+        persistVoiceProviders()
+        setAiVoiceEnabled(true)
+    }
+
+    /** Puts an AI chat provider first in the list and turns AI chat on. */
+    fun preferProvider(id: String) {
+        val i = providers.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val p = providers.removeAt(i)
+        providers.add(0, p)
+        persistProviders()
+        setAiEnabled(true)
     }
 
     fun moveVoiceProvider(id: String, delta: Int) {
@@ -335,7 +364,11 @@ class Settings(context: Context) {
                     )
                 }
             }
-            if (out.isNotEmpty()) return out
+            if (out.isNotEmpty()) {
+                // Free AI added in a later version: offer it (at the end) to people who already had a saved list.
+                if (out.none { it.id == "kilo" }) AiPresets.all.firstOrNull { it.id == "kilo" }?.let { out.add(Provider(it.id, it.name, it.baseUrl, it.model, "")) }
+                return out
+            }
         }
         // First run of this version: bring over whatever was set up before.
         val oldSel = sp.getString("ai_provider", "gemini") ?: "gemini"

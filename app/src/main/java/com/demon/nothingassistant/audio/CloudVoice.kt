@@ -356,6 +356,14 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
     /** Download-then-play path for providers that can't stream raw audio. */
     private fun synth(p: Provider, text: String): File? {
         val clean = text.take(3800)
+        if (p.baseUrl.startsWith(EdgeTts.URL_PREFIX)) {
+            val f = File(dir, "e_${p.extra}_${settings.voiceSpeed}_${clean.hashCode()}.mp3")
+            if (f.exists() && f.length() > 200) return f
+            val mp3 = EdgeTts.synthesize(clean, p.extra.ifBlank { "en-US-AriaNeural" }, settings.voiceSpeed)
+            f.writeBytes(mp3)
+            trim()
+            return f.takeIf { it.length() > 200 }
+        }
         val groq = p.baseUrl.contains("groq")
         val ext = if (groq) "wav" else "mp3"
         val key = "f_${p.id}_${p.model}_${p.extra}_${clean.hashCode()}.$ext".replace('/', '_')
@@ -403,6 +411,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
     suspend fun fetchModels(p: Provider): Result<List<Pick>> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
             if (p.baseUrl.isBlank()) throw RuntimeException("Fill in ADDRESS first.")
+            if (p.baseUrl.startsWith(EdgeTts.URL_PREFIX)) return@runCatching listOf(Pick("edge", "edge (free Microsoft Edge voices)"))
             if (p.key.isBlank()) throw RuntimeException("Fill in API KEY first.")
             val base = p.baseUrl.trimEnd('/')
             val ids = ArrayList<String>()
@@ -432,6 +441,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
     suspend fun fetchVoices(p: Provider): Result<List<Pick>> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
             val base = p.baseUrl.trimEnd('/')
+            if (base.startsWith("edge://")) return@runCatching EdgeTts.voices(dir).map { Pick(it.shortName, it.label) }
             when {
                 base.contains("elevenlabs") -> {
                     if (p.key.isBlank()) throw RuntimeException("Fill in API KEY first.")

@@ -23,3 +23,8 @@
 -keep class org.vosk.** { *; }
 -keepclassmembers class * extends com.sun.jna.** { public *; }
 -dontwarn java.awt.**
+
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**

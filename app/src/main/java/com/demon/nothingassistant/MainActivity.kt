@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
         var showAiVoice by remember { mutableStateOf(false) }
         var showAccess by remember { mutableStateOf(false) }
         var showLog by remember { mutableStateOf(false) }
+        var showLive by remember { mutableStateOf(false) }
         var showAppearance by remember { mutableStateOf(false) }
 
         val dark = when (settings.theme) {
@@ -171,8 +172,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        BackHandler(enabled = showAppearance || showLog || showAi || showAiVoice || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
+        BackHandler(enabled = showLive || showAppearance || showLog || showAi || showAiVoice || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
             when {
+                showLive -> { controller.stopLive(); showLive = false }
                 showAppearance -> showAppearance = false
                 showLog -> showLog = false
                 showVoice -> showVoice = false
@@ -186,7 +188,12 @@ class MainActivity : ComponentActivity() {
         }
 
         com.demon.nothingassistant.ui.GlassRoot(palette) {
-        if (showLog) {
+        if (showLive) {
+            com.demon.nothingassistant.ui.LiveScreen(
+                controller = controller, ui = ui, settings = settings, palette = palette,
+                onClose = { controller.stopLive(); showLive = false }
+            )
+        } else if (showLog) {
             LogScreen(palette = palette, onClose = { showLog = false })
         } else if (showAppearance) {
             AppearanceScreen(settings = settings, palette = palette, onClose = { showAppearance = false })
@@ -278,6 +285,10 @@ class MainActivity : ComponentActivity() {
                 onOpenAi = { showAi = true },
                 onOpenAccess = { showAccess = true },
                 onOpenVoice = { showVoice = true },
+                onOpenLive = {
+                    if (controller.hasMicPermission()) { showSettings = false; showLive = true; controller.startLive() }
+                    else anyPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                },
                 onOpenAppearance = { showAppearance = true },
                 onOpenLog = { showLog = true },
                 onClose = { showSettings = false }
@@ -297,7 +308,11 @@ class MainActivity : ComponentActivity() {
                 onCancel = controller::cancel,
                 onConfirm = controller::confirmPending,
                 onDismissConfirm = controller::dismissPending,
-                onOpenSettings = { showSettings = true }
+                onOpenSettings = { showSettings = true },
+                onOpenLive = {
+                    if (controller.hasMicPermission()) { showLive = true; controller.startLive() }
+                    else anyPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             )
         }
         }

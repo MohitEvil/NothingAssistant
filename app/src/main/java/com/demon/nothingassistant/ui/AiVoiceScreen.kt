@@ -115,6 +115,12 @@ fun AiVoiceScreen(
         )
         Spacer(Modifier.height(20.dp))
 
+        Spacer(Modifier.height(12.dp))
+                SmallAction("USE FREE EDGE VOICES", true, palette) {
+                    settings.preferVoiceProvider("v_edge")
+                    selectedId = "v_edge"; picks = emptyList(); fetchNote = "EDGE IS NOW FIRST. TAP FETCH VOICES TO PICK ONE."
+                }
+                
         Box(Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().alpha(if (on) 1f else 0.3f)) {
                 Text(
@@ -122,7 +128,7 @@ fun AiVoiceScreen(
                         "Online voices need internet and can be slower than the offline voice. Keys stay on this phone.",
                     color = palette.muted, fontSize = 12.sp
                 )
-                Spacer(Modifier.height(16.dp))
+Spacer(Modifier.height(16.dp))
                 SectionLabel("PROVIDERS · LONG PRESS TO REORDER", palette)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     list.forEachIndexed { i, p ->
@@ -183,6 +189,10 @@ fun AiVoiceScreen(
                                     Field("NAME", selected.name, palette) { v -> settings.updateVoiceProvider(selected.id) { it.copy(name = v.uppercase()) } }
                                     Spacer(Modifier.height(14.dp))
                                 }
+                                if (selected.keyless) {
+                                    Text("FREE · NO ACCOUNT OR KEY NEEDED. NEEDS INTERNET. 350+ VOICES IN MANY LANGUAGES.", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+                                    Spacer(Modifier.height(14.dp))
+                                } else {
                                 Field("API KEY", selected.key, palette, secret = true) { v -> settings.updateVoiceProvider(selected.id) { it.copy(key = v) } }
                                 Spacer(Modifier.height(14.dp))
                                 Field("ADDRESS", selected.baseUrl, palette, keyboard = KeyboardType.Uri) { v -> settings.updateVoiceProvider(selected.id) { it.copy(baseUrl = v) } }
@@ -201,6 +211,7 @@ fun AiVoiceScreen(
                                     }
                                 }
                                 Spacer(Modifier.height(14.dp))
+                                }
                                 Field("VOICE", selected.extra, palette) { v -> settings.updateVoiceProvider(selected.id) { it.copy(extra = v) } }
                                 Spacer(Modifier.height(8.dp))
                                 FetchButton(if (fetching == "voice") "…" else "FETCH VOICES", palette) {

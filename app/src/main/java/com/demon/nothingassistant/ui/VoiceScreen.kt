@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -142,6 +144,9 @@ fun VoiceScreen(
             }
             Chip("PHONE VOICE", settings.voiceEngine == "system", palette) { voice.useDeviceVoice() }
         }
+
+        Spacer(Modifier.height(24.dp))
+        PhoneVoices(settings, voice, palette)
 
         if (!neural.libraryPresent) {
             Spacer(Modifier.height(12.dp))
@@ -289,6 +294,74 @@ private fun ProgressBar(progress: Float, palette: GlyphPalette) {
                     .fillMaxWidth(progress.coerceIn(0.02f, 1f))
                     .height(6.dp)
                     .background(palette.red, androidx.compose.foundation.shape.RoundedCornerShape(50))
+            )
+        }
+    }
+}
+
+/** Every voice the phone's own speech engine has installed, found automatically. Tap the speaker to hear one, tap the row to use it. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun PhoneVoices(settings: Settings, voice: VoiceHub, palette: GlyphPalette) {
+    val mono = FontFamily.Monospace
+    var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var voices by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(emptyList<com.demon.nothingassistant.audio.SpeechOut.DeviceVoice>()) }
+    var filter by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(open) {
+        if (open) {
+            var tries = 0
+            while (voices.isEmpty() && tries++ < 20) {
+                voices = voice.deviceVoices()
+                if (voices.isEmpty()) kotlinx.coroutines.delay(500)
+            }
+        }
+    }
+    SectionLabel("PHONE VOICES (INSTALLED ON THIS PHONE)", palette)
+    Text(
+        "Found automatically from the phone's speech engine. Works offline for voices marked LOCAL.",
+        color = palette.muted, fontSize = 12.sp
+    )
+    Spacer(Modifier.height(10.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Chip(if (open) "HIDE LIST" else "CHOOSE A PHONE VOICE", open, palette) { open = !open }
+        Chip("AUTOMATIC", settings.deviceVoice.isBlank(), palette) { settings.setDeviceVoice(""); voice.useDeviceVoice() }
+    }
+    if (settings.deviceVoice.isNotBlank()) {
+        Spacer(Modifier.height(8.dp))
+        Text("IN USE: ${settings.deviceVoice}", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+    }
+    if (!open) return
+    Spacer(Modifier.height(12.dp))
+    if (voices.isEmpty()) {
+        Text("LOOKING FOR VOICES…", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+        return
+    }
+    com.demon.nothingassistant.ui.Field("SEARCH", filter, palette) { filter = it }
+    Spacer(Modifier.height(8.dp))
+    val shown = (if (filter.isBlank()) voices else voices.filter { it.label.contains(filter.trim(), ignoreCase = true) }).take(80)
+    Text("${shown.size} OF ${voices.size} VOICES", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+    Spacer(Modifier.height(8.dp))
+    shown.forEach { v ->
+        val on = settings.deviceVoice == v.name
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                .background(if (on) palette.dim.copy(alpha = 0.6f) else palette.card, androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
+                .clickable { settings.setDeviceVoice(v.name); voice.useDeviceVoice() }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(if (on) "●" else "○", color = if (on) palette.red else palette.muted, fontFamily = mono, fontSize = 14.sp)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(v.label, color = palette.fg, fontSize = 12.sp)
+                Text(if (v.offline) "LOCAL" else "NEEDS INTERNET", color = palette.muted, fontFamily = mono, fontSize = 9.sp, letterSpacing = 1.sp)
+            }
+            Text(
+                "PLAY", color = palette.fg, fontFamily = mono, fontSize = 11.sp, letterSpacing = 1.sp,
+                modifier = Modifier
+                    .border(androidx.compose.foundation.BorderStroke(1.dp, palette.muted), androidx.compose.foundation.shape.RoundedCornerShape(50))
+                    .clickable { voice.previewDeviceVoice(v.name) }
+                    .padding(horizontal = 12.dp, vertical = 7.dp)
             )
         }
     }

@@ -67,7 +67,7 @@ class Brain(private val settings: Settings) {
         try {
             val base = p.baseUrl.trim().trimEnd('/')
             if (base.isBlank()) throw BrainException("Fill in ADDRESS first.")
-            if (p.key.isBlank()) throw BrainException("Fill in API KEY first.")
+            if (p.key.isBlank() && !p.keyless) throw BrainException("Fill in API KEY first.")
             val anthropic = p.id == "anthropic" || base.contains("anthropic.com")
             val conn = URL("$base/models" + if (anthropic) "?limit=100" else "").openConnection() as HttpURLConnection
             val reply = try {
@@ -77,7 +77,7 @@ class Brain(private val settings: Settings) {
                 if (anthropic) {
                     conn.setRequestProperty("x-api-key", p.key.trim())
                     conn.setRequestProperty("anthropic-version", "2023-06-01")
-                } else {
+                } else if (p.key.isNotBlank()) {
                     conn.setRequestProperty("Authorization", "Bearer " + p.key.trim())
                 }
                 val code = conn.responseCode
@@ -90,8 +90,11 @@ class Brain(private val settings: Settings) {
             val root = JSONObject(reply.body)
             val arr = root.optJSONArray("data") ?: root.optJSONArray("models") ?: JSONArray()
             val ids = ArrayList<String>()
+            val kilo = base.contains("api.kilo.ai")
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i)
+                // Kilo lists paid models too: keep only the ones it marks free.
+                if (kilo && o?.optBoolean("isFree", false) != true) continue
                 val id = (o?.optString("id").orEmpty().ifBlank { o?.optString("name").orEmpty() })
                     .removePrefix("models/")
                 if (id.isNotBlank()) ids.add(id)
@@ -240,8 +243,12 @@ class Brain(private val settings: Settings) {
             if (anthropic) {
                 conn.setRequestProperty("x-api-key", p.key.trim())
                 conn.setRequestProperty("anthropic-version", "2023-06-01")
-            } else {
+            } else if (p.key.isNotBlank()) {
                 conn.setRequestProperty("Authorization", "Bearer " + p.key.trim())
+            }
+            if (p.keyless) {
+                conn.setRequestProperty("HTTP-Referer", "https://github.com/MohitEvil/NothingAssistant")
+                conn.setRequestProperty("X-Title", "Nothing Assistant")
             }
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
 
@@ -313,7 +320,8 @@ class Brain(private val settings: Settings) {
                 if (detail.isNotBlank()) " (${detail.take(70)})" else ""
             401, 403 -> "The AI key was rejected. Check it in Settings."
             404 -> "The AI address or model wasn't found. Check Settings."
-            429 -> "The AI is rate limited right now. Try again in a minute."
+            429 -> "The AI is rate limited right now. Try again in a minute. (The free AI allows about 200 requests an hour.)"
+            402 -> "The free AI limit is used up for now. Try again later, or add your own key."
             else -> if (detail.isNotBlank()) "AI error $code: ${detail.take(80)}" else "The AI service had an error ($code)."
         }
     }

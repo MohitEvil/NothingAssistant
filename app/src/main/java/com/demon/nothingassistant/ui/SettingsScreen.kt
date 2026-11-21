@@ -55,6 +55,7 @@ fun SettingsScreen(
     onOpenAi: () -> Unit,
     onOpenAccess: () -> Unit,
     onOpenVoice: () -> Unit,
+    onOpenLive: () -> Unit,
     onOpenAppearance: () -> Unit,
     onOpenLog: () -> Unit,
     onClose: () -> Unit
@@ -107,6 +108,8 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
         SectionLabel("CUSTOMISE", palette)
         Card(palette) {
+            NavRow(DotIcons.VOICE, "Live mode", "Hands-free spoken conversation, like a phone call", palette, onOpenLive)
+            Divider(palette)
             NavRow(DotIcons.VOICE, "Voice", "Voice, language, speech recognition and speed", palette, onOpenVoice)
             Divider(palette)
             NavRow(

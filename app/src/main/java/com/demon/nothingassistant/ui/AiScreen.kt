@@ -127,6 +127,12 @@ fun AiScreen(
         )
         Spacer(Modifier.height(20.dp))
 
+        Spacer(Modifier.height(12.dp))
+                SmallAction("USE FREE AI · NO KEY", true, palette) {
+                    settings.preferProvider("kilo")
+                    selectedId = "kilo"; models = emptyList(); fetchNote = "KILO FREE IS NOW FIRST. NO KEY NEEDED."
+                }
+                
         // Everything below goes dim and untouchable while AI chat is off.
         Box(Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().alpha(if (on) 1f else 0.3f)) {
@@ -135,7 +141,7 @@ fun AiScreen(
                         "Without a key it still runs commands and makes small talk. Keys stay on this phone.",
                     color = palette.muted, fontSize = 12.sp
                 )
-                Spacer(Modifier.height(16.dp))
+Spacer(Modifier.height(16.dp))
                 SectionLabel("PROVIDERS · LONG PRESS TO REORDER", palette)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     settings.providers.forEachIndexed { i, p ->
@@ -199,10 +205,15 @@ fun AiScreen(
                                     Field("NAME", selected.name, palette) { v -> settings.updateProvider(selected.id) { it.copy(name = v.uppercase()) } }
                                     Spacer(Modifier.height(14.dp))
                                 }
+                                if (selected.keyless) {
+                                    Text("FREE · NO ACCOUNT OR KEY NEEDED. ABOUT 200 REQUESTS AN HOUR. NEEDS INTERNET.", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+                                    Spacer(Modifier.height(14.dp))
+                                } else {
                                 Field("API KEY", selected.key, palette, secret = true) { v -> settings.updateProvider(selected.id) { it.copy(key = v) } }
                                 Spacer(Modifier.height(14.dp))
                                 Field("ADDRESS", selected.baseUrl, palette, keyboard = KeyboardType.Uri) { v -> settings.updateProvider(selected.id) { it.copy(baseUrl = v) } }
                                 Spacer(Modifier.height(14.dp))
+                                }
                                 Text("MODEL", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 2.sp)
                                 Spacer(Modifier.height(6.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -59,7 +59,8 @@ fun AssistantScreen(
     onCancel: () -> Unit,
     onConfirm: () -> Unit,
     onDismissConfirm: () -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenLive: () -> Unit = {}
 ) {
     val fps = targetFps(ui.state, perf)
     val clock = rememberGlyphClock(fps)
@@ -83,6 +84,16 @@ fun AssistantScreen(
         ) {
             Text("NOTHING ASSISTANT", color = palette.muted, fontFamily = mono, fontSize = 11.sp, letterSpacing = 2.sp)
             Spacer(Modifier.weight(1f))
+            Text(
+                "LIVE",
+                color = palette.muted,
+                fontFamily = mono,
+                fontSize = 11.sp,
+                letterSpacing = 2.sp,
+                modifier = Modifier
+                    .clickable(onClick = onOpenLive)
+                    .padding(vertical = 8.dp, horizontal = 10.dp)
+            )
             Text(
                 "SETTINGS",
                 color = palette.muted,

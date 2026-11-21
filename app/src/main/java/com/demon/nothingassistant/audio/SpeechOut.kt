@@ -145,6 +145,37 @@ class SpeechOut(context: Context, private val settings: Settings) : Voice {
         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
             engine.setLanguage(Locale.getDefault())
         }
+        // A voice picked in Voice settings wins, as long as it speaks the language being spoken.
+        val picked = settings.deviceVoice
+        if (picked.isNotBlank() && !devanagari) {
+            runCatching {
+                engine.voices?.firstOrNull { it.name == picked }?.let { v ->
+                    if (v.locale.language == Locale.forLanguageTag(tag).language || v.locale.language == Locale.getDefault().language) engine.voice = v
+                }
+            }
+        }
+    }
+
+    /** One voice the phone's speech engine reports. */
+    class DeviceVoice(val name: String, val label: String, val offline: Boolean)
+
+    /** Every voice the phone's speech engine has installed (empty until the engine has started). */
+    fun deviceVoices(): List<DeviceVoice> = runCatching {
+        tts?.voices.orEmpty()
+            .filter { !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            .map { DeviceVoice(it.name, it.name + "  ·  " + it.locale.getDisplayName(Locale.ENGLISH), !it.isNetworkConnectionRequired) }
+            .sortedWith(compareBy({ !it.name.startsWith("en-us", true) }, { !it.name.startsWith("en", true) }, { it.name }))
+    }.getOrDefault(emptyList())
+
+    /** Plays a short sample in one voice so it can be heard before it is picked. */
+    fun preview(name: String) {
+        val engine = tts ?: return
+        if (!ready) return
+        runCatching {
+            engine.voices?.firstOrNull { it.name == name }?.let { engine.voice = it }
+            engine.setAudioAttributes(attrs)
+            engine.speak("Hi, this is how I sound.", TextToSpeech.QUEUE_FLUSH, null, "preview${++counter}")
+        }
     }
 
     private fun chunk(t: String): List<String> {

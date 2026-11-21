@@ -203,3 +203,10 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Speech: the app asks the phone's recogniser which languages it supports (Google if present) and sets en-US, else the phone language, else the first available, until you pick one. Voice settings shows what was detected, or walks you through installing Google's recogniser (Play Store page, Voice input settings, refresh). Vosk stays optional.
 - Liquid Glass now uses the Haze library: the background lives in its own layer behind each screen and every pane blurs it live.
 - Permission grants: fixed the Shizuku "process hasn't exited" error that made every grant step report failure.
+
+## Round 5
+- Liquid Glass: Haze effect now uses a transparent background colour (no fill), so only the blurred backdrop and the smoked tint show.
+- Free AI: "KILO FREE" provider (api.kilo.ai gateway, model kilo-auto/free, no account or key, about 200 requests an hour). AI settings has a USE FREE AI button that turns AI chat on and puts it first. FETCH lists only the models Kilo marks free.
+- Free online voices: "EDGE FREE" voice provider (Microsoft Edge Read Aloud, 350+ neural voices, no key). AI settings > AI Voice has USE FREE EDGE VOICES and FETCH VOICES (searchable). Falls back to the offline voice if the service fails.
+- Phone voices: Voice page lists every voice the phone's speech engine has installed (auto-detected), with search, LOCAL / NEEDS INTERNET tags, a PLAY preview and AUTOMATIC.
+- Live mode (Settings > Live mode): hands-free spoken conversation with transcript, pause/resume, tap to interrupt, typed messages, and the same commands and AI as the normal assistant.
