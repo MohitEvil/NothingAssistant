@@ -34,7 +34,10 @@ object PrivPhrases {
 
         // Background apps, restart
         if (Regex("^(?:close|kill|stop|clear)\\s+(?:all\\s+)?(?:the\\s+)?(?:background apps|background processes|everything in the background)$", I).containsMatchIn(s)) return Command.Priv("KILL_ALL")
-        if (Regex("^(?:reboot|restart)(?: my| the)?(?: phone| device)?$", I).containsMatchIn(s)) return Command.Priv("REBOOT")
+        if (Regex("^(?:please |can you |could you |just )?(?:reboot|restart|re-start) (?:in(?:to)?|to|into) (?:the )?recovery(?: mode)?$", I).containsMatchIn(s)) return Command.Priv("REBOOT_RECOVERY")
+        if (Regex("^(?:please |can you |could you |just )?(?:reboot|restart|re-start) (?:in(?:to)?|to|into) (?:the )?(?:bootloader|fastboot|download)(?: mode)?$", I).containsMatchIn(s)) return Command.Priv("REBOOT_BOOTLOADER")
+        if (Regex("^(?:please |can you |could you |just )?(?:power off|power down|shut ?down|switch off|turn off)(?: my| the| this)?(?: android)?(?: phone| device| mobile| handset)(?: now| right now| please)?$|^(?:phone|mobile|device) (?:ko )?(?:band|off|shut ?down) (?:kar|karo|kardo|kar do)$", I).containsMatchIn(s)) return Command.Priv("POWEROFF")
+        if (Regex("^(?:please |can you |could you |just )?(?:reboot|restart|re-start)(?: my| the| this)?(?: android)?(?: phone| device| mobile| handset)?(?: now| right now| please| once)?$|^(?:phone|mobile|device)(?: ko)? (?:restart|reboot) (?:kar|karo|kardo|kar do|karna)$|^(?:restart|reboot) (?:kar|karo|kardo|kar do)$", I).containsMatchIn(s)) return Command.Priv("REBOOT")
 
         // Shell
         Regex("^(?:run|execute)\\s+(?:the\\s+)?(?:adb\\s+|shell\\s+)?(?:shell\\s+)?command\\s+(.+)$|^adb shell\\s+(.+)$|^shell\\s+(.+)$", I).find(s)?.let { m ->

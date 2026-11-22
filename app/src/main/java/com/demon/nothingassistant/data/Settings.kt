@@ -131,6 +131,30 @@ class Settings(context: Context) {
         private set
     var theme by mutableIntStateOf(sp.getInt("theme", ThemeMode.DARK))
         private set
+    /** Offline recogniser listens for two languages at once (e.g. English and Hindi) and keeps the better result. */
+    /** Which gender the assistant speaks as in replies: auto (from the voice), female or male. */
+    var voiceGender by mutableStateOf(sp.getString("voice_gender", "auto") ?: "auto")
+        private set
+    /** Send a screenshot to the AI when a request is about what is on screen. */
+    var aiVision by mutableStateOf(sp.getBoolean("ai_vision", true))
+        private set
+    var bilingual by mutableStateOf(sp.getBoolean("bilingual", true))
+        private set
+    /** Speaking while the assistant talks stops it so you can give a new command. */
+    var interrupt by mutableStateOf(sp.getBoolean("speak_interrupt", true))
+        private set
+    /** Keep Nothing Assistant as the default digital assistant after a restart (needs Shizuku or root). */
+    var keepAssistant by mutableStateOf(sp.getBoolean("keep_assistant", true))
+        private set
+    var wakeWord by mutableStateOf(sp.getBoolean("wake_word", false))
+        private set
+    var wakePhrase by mutableStateOf(sp.getString("wake_phrase", "hey nothing") ?: "hey nothing")
+        private set
+    /** Different ways the recogniser heard the phrase while training. */
+    var wakeVariants by mutableStateOf((sp.getStringSet("wake_variants", emptySet()) ?: emptySet()).toList().sorted())
+        private set
+    var wakeSens by mutableStateOf(sp.getFloat("wake_sens", 0.5f))
+        private set
 
     /** Look: 0 plain Nothing, 1 liquid glass, 2 minimal liquid glass. */
     var glassStyle by mutableIntStateOf(sp.getInt("glass_style", 0))
@@ -326,6 +350,24 @@ class Settings(context: Context) {
     fun setLanguageAuto(v: String) { language = v; sp.edit().putString("language", v).apply() }
     @JvmName("applySupportedLangs")
     fun setSupportedLangs(v: List<String>) { supportedLangs = v.sorted(); sp.edit().putStringSet("asr_langs", v.toSet()).apply() }
+    @JvmName("applyVoiceGender")
+    fun setVoiceGender(v: String) { voiceGender = v; sp.edit().putString("voice_gender", v).apply() }
+    @JvmName("applyAiVision")
+    fun setAiVision(v: Boolean) { aiVision = v; sp.edit().putBoolean("ai_vision", v).apply() }
+    @JvmName("applyBilingual")
+    fun setBilingual(v: Boolean) { bilingual = v; sp.edit().putBoolean("bilingual", v).apply() }
+    @JvmName("applyInterrupt")
+    fun setInterrupt(v: Boolean) { interrupt = v; sp.edit().putBoolean("speak_interrupt", v).apply() }
+    @JvmName("applyKeepAssistant")
+    fun setKeepAssistant(v: Boolean) { keepAssistant = v; sp.edit().putBoolean("keep_assistant", v).apply() }
+    @JvmName("applyWakeWord")
+    fun setWakeWord(v: Boolean) { wakeWord = v; sp.edit().putBoolean("wake_word", v).apply() }
+    @JvmName("applyWakePhrase")
+    fun setWakePhrase(v: String) { wakePhrase = v.trim().lowercase(); wakeVariants = emptyList(); sp.edit().putString("wake_phrase", wakePhrase).putStringSet("wake_variants", emptySet()).apply() }
+    @JvmName("applyWakeVariants")
+    fun setWakeVariants(v: List<String>) { wakeVariants = v.distinct().sorted(); sp.edit().putStringSet("wake_variants", wakeVariants.toSet()).apply() }
+    @JvmName("applyWakeSens")
+    fun setWakeSens(v: Float) { wakeSens = v; sp.edit().putFloat("wake_sens", v).apply() }
     @JvmName("applyTheme")
     fun setTheme(v: Int) { theme = v; sp.edit().putInt("theme", v).apply() }
     @JvmName("applyGlassStyle")

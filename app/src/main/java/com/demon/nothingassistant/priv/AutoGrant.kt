@@ -24,6 +24,8 @@ object AutoGrant {
         // Quiet ones first: special access that never touches the process.
         for (op in listOf("SYSTEM_ALERT_WINDOW", "WRITE_SETTINGS", "SCHEDULE_EXACT_ALARM", "REQUEST_INSTALL_PACKAGES", "RUN_IN_BACKGROUND", "RUN_ANY_IN_BACKGROUND"))
             s.add(Step("op:$op", "appops set $pkg $op allow"))
+        // Lets the app set the default assistant itself after a restart, even before Shizuku has started.
+        s.add(Step("perm:WRITE_SECURE_SETTINGS", "pm grant $pkg android.permission.WRITE_SECURE_SETTINGS", "android.permission.WRITE_SECURE_SETTINGS"))
         s.add(Step("idle", "dumpsys deviceidle whitelist +$pkg"))
         s.add(Step("notiflistener", "cmd notification allow_listener $pkg/$pkg.service.NotificationFeed"))
         // Runtime permissions. Storage and media last: changing those is what restarts an app.
@@ -73,13 +75,53 @@ object AutoGrant {
         } finally { running = false }
     }
 
+    private fun svcName(c: Context) = c.packageName + "/" + c.packageName + ".voice.NothingInteractionService"
+
+    private fun currentAssistant(c: Context): String =
+        runCatching { android.provider.Settings.Secure.getString(c.contentResolver, "assistant").orEmpty() }.getOrDefault("")
+
+    /** Remembers that the person has chosen this app as their assistant, so it can be put back after a restart. */
+    fun noteAssistant(c: Context) {
+        if (currentAssistant(c).contains(c.packageName)) prefs(c).edit().putBoolean("assistant_ours", true).apply()
+    }
+
+    /**
+     * After a restart some ROMs hand the default assistant back to Gemini. If the person had chosen this app, put it back:
+     * straight away through WRITE_SECURE_SETTINGS (needs no Shizuku), or through Shizuku/root once they are up. Retries for a while,
+     * because Shizuku and the system settings are not ready the moment the phone has booted. Only runs in the first minutes after boot.
+     */
+    suspend fun keepAssistant(context: Context, tries: Int = 10): Boolean {
+        val sp = context.getSharedPreferences("nothing_settings", Context.MODE_PRIVATE)
+        if (!sp.getBoolean("keep_assistant", true)) return false
+        if (android.os.SystemClock.elapsedRealtime() > 15 * 60_000L) return false
+        val pkg = context.packageName
+        repeat(tries) {
+            val cur = currentAssistant(context)
+            if (cur.contains(pkg)) { prefs(context).edit().putBoolean("assistant_ours", true).apply(); return true }
+            if (!prefs(context).getBoolean("assistant_ours", false)) return false
+            val svc = svcName(context)
+            val wrote = runCatching {
+                if (context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == PackageManager.PERMISSION_GRANTED) {
+                    android.provider.Settings.Secure.putString(context.contentResolver, "assistant", svc)
+                    android.provider.Settings.Secure.putString(context.contentResolver, "voice_interaction_service", svc)
+                    true
+                } else false
+            }.getOrDefault(false)
+            if (!wrote && Priv.available()) setAssistant(context)
+            delay(if (it < 3) 6_000 else 20_000)
+        }
+        return currentAssistant(context).contains(pkg)
+    }
+
     /** Makes Nothing Assistant the default assistant without opening any settings page. */
     suspend fun setAssistant(context: Context): Boolean {
         if (!Priv.available()) return false
         val pkg = context.packageName
         val svc = "$pkg/$pkg.voice.NothingInteractionService"
         Priv.sh("settings put secure assistant $svc; settings put secure voice_interaction_service $svc", 15)
-        return Priv.sh("settings get secure assistant").text.contains(pkg)
+        val ok = Priv.sh("settings get secure assistant").text.contains(pkg)
+        if (ok) prefs(context).edit().putBoolean("assistant_ours", true).apply()
+        return ok
     }
 }
 

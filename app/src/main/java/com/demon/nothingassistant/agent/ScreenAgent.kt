@@ -20,6 +20,9 @@ class ScreenAgent(
     private val exec: suspend (Command) -> ActionResult,
     private val brain: () -> Brain?
 ) {
+    /** Whether a screenshot is sent to the AI at each step. */
+    var vision: () -> Boolean = { true }
+
     private val payWords = Regex("\\b(pay|payment|place (?:your )?order|confirm (?:order|booking|ride|payment|purchase)|book (?:now|ride|cab|table)|request (?:ride|cab)|buy(?: now)?|checkout|check out|proceed to pay|order now|purchase|subscribe|send money|transfer)\\b", RegexOption.IGNORE_CASE)
 
     private val foodApps = listOf("swiggy", "zomato", "blinkit", "zepto", "instamart", "bigbasket", "dominos", "mcdonald's", "kfc")
@@ -103,8 +106,10 @@ class ScreenAgent(
         }
         val b = brain()
         if (b != null && b.configured()) {
-            val reply = b.ask(emptyList(), prompt + "\nReply with ONE JSON object only: {\"do\":\"tap|input_text|scroll|back|open_app|done\",\"arg\":\"label, text, up/down, app name or summary\"}. Use done when finished or only a payment is left.",
-                "You operate an Android phone by reading its screen, one atomic action at a time. HIST lists what you already did; LAST_ACTION_FAILED means try something different.").getOrNull() ?: return null
+            val q = prompt + "\nReply with ONE JSON object only: {\"do\":\"tap|input_text|scroll|back|open_app|done\",\"arg\":\"label, text, up/down, app name or summary\"}. Use done when finished or only a payment is left."
+            val sys = "You operate an Android phone by reading its screen, one atomic action at a time. A screenshot of the screen may be attached: use it together with the UI list. HIST lists what you already did; LAST_ACTION_FAILED means try something different."
+            val img = if (vision()) NothingAccess.instance?.let { runCatching { com.demon.nothingassistant.access.Ocr.screenJpeg(it, 900) }.getOrNull() } else null
+            val reply = (if (img != null) b.ask(emptyList(), q, sys, img).getOrNull() else null) ?: b.ask(emptyList(), q, sys).getOrNull() ?: return null
             val o = runCatching { JSONObject(reply.substringAfter('{').let { "{" + it.substringBeforeLast('}') + "}" }) }.getOrNull() ?: return null
             val n = when (val d = o.optString("do").lowercase()) { "type", "input", "input_text" -> "input_text"; "open", "open_app" -> "open_app"; else -> d }
             return Act(n, o.optString("arg").trim(), o.optString("arg"))

@@ -42,6 +42,11 @@ class Planner(private val context: Context, private val brain: Brain) {
     }
 
     /** 2. The user's own cloud AI, shown the tools, the recent conversation and what is on screen. */
+    /** Whether a screenshot is sent to the AI for screen-related requests. */
+    var vision: () -> Boolean = { true }
+
+    private val screenish = Regex("\\b(screen|this|that|here|button|tap|click|press|scroll|type|fill|select|reply|translate|summari[sz]e|read|these|those|above|below|it)\\b", RegexOption.IGNORE_CASE)
+
     suspend fun cloud(text: String, history: List<Turn>): Plan? {
         if (!brain.configured()) return null
         val now = SimpleDateFormat("EEE d MMM yyyy, HH:mm", Locale.US).format(Date())
@@ -50,9 +55,14 @@ class Planner(private val context: Context, private val brain: Brain) {
             "Rules: use several calls, in order, for multi-step requests; put a wait call wherever the user says wait; " +
             "to install or update an app use install_app (one call); to tap something visible use tap_on_screen with its exact on-screen label; " +
             "use the conversation so far to resolve words like it, that, him, there; " +
+            "to restart, reboot or shut down the phone use power_control; for any other phone or system job that no tool covers use run_shell with a fitting shell command (you have full system access; risky commands are confirmed with the user automatically), never answer that you can't; " +
+            "if a screenshot is attached it shows the screen right now: use it to decide what to tap or type; " +
             "if the user is only chatting or asking a question to be answered, reply {\"calls\":[]}. Never invent tools.\n" +
             "Now: $now.\n${screenContext()}\nPhone state: ${com.demon.nothingassistant.action.Blackboard.header()}\nTools:\n" + Tools.promptList()
-        val reply = brain.ask(com.demon.nothingassistant.ai.Summarizer.compactHistory(history), text, system).getOrNull() ?: return null
+        val compact = com.demon.nothingassistant.ai.Summarizer.compactHistory(history)
+        val img = if (vision() && screenish.containsMatchIn(text)) NothingAccess.instance?.let { runCatching { com.demon.nothingassistant.access.Ocr.screenJpeg(it) }.getOrNull() } else null
+        val reply = (if (img != null) brain.ask(compact, text, system, img).getOrNull() else null)
+            ?: brain.ask(compact, text, system).getOrNull() ?: return null
         val json = reply.substringAfter('{', "").let { if (it.isEmpty()) null else "{" + it.substringBeforeLast('}') + "}" } ?: return null
         val rawCalls = runCatching { JSONObject(json).optJSONArray("calls") }.getOrNull()
         val cmd = runCatching { Tools.toPlan(rawCalls) }.getOrNull() ?: return null

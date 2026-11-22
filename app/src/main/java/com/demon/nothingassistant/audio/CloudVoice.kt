@@ -23,7 +23,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** One choice in a fetched list: [value] is what gets saved, [label] is what is shown. */
-class Pick(val value: String, val label: String)
+class Pick(val value: String, val label: String, val sub: String = "", val tag: String = "", val gender: String = "")
 
 /**
  * Optional AI voice. Google Gemini, OpenAI and ElevenLabs are STREAMED: raw 16-bit PCM goes straight into an AudioTrack
@@ -340,6 +340,21 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
         return result.await()
     }
 
+    /** Plays a short sample of one specific voice of [p] (for the voice picker). */
+    fun previewVoice(p: Provider, voice: String) {
+        val q = p.copy(extra = voice)
+        val my = ++token
+        pool.execute {
+            try {
+                val text = "Hi, this is how I sound."
+                if (streams(q)) play(q, text, my) {} else {
+                    val f = synth(q, text) ?: throw RuntimeException("no sound came back")
+                    main.post { playFile(f, my, {}, {}, {}) }
+                }
+            } catch (e: Exception) { AppLog.e("cloudvoice", "preview: " + e.message) }
+        }
+    }
+
     fun stop() {
         token++
         release()
@@ -441,7 +456,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
     suspend fun fetchVoices(p: Provider): Result<List<Pick>> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
             val base = p.baseUrl.trimEnd('/')
-            if (base.startsWith("edge://")) return@runCatching EdgeTts.voices(dir).map { Pick(it.shortName, it.label) }
+            if (base.startsWith("edge://")) return@runCatching EdgeTts.voices(dir).map { Pick(it.shortName, it.name, it.localeName.ifBlank { it.locale } + (if (it.gender.isNotBlank()) " · " + it.gender else ""), if (it.shortName.contains("Multilingual")) "Multi" else "", it.gender) }
             when {
                 base.contains("elevenlabs") -> {
                     if (p.key.isBlank()) throw RuntimeException("Fill in API KEY first.")

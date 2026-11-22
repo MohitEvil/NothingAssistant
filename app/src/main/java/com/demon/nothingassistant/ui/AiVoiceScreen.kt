@@ -52,6 +52,7 @@ fun AiVoiceScreen(
     onTestVoice: suspend (Provider) -> String,
     onFetchModels: suspend (Provider) -> Result<List<com.demon.nothingassistant.audio.Pick>>,
     onFetchVoices: suspend (Provider) -> Result<List<com.demon.nothingassistant.audio.Pick>>,
+    onPreviewVoice: (Provider, String) -> Unit = { _, _ -> },
     onOpenChatTab: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -68,11 +69,31 @@ fun AiVoiceScreen(
     var picks by remember { mutableStateOf<List<com.demon.nothingassistant.audio.Pick>>(emptyList()) }
     var picksFor by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("") }
+    var pickerLoading by remember { mutableStateOf(false) }
 
     val on = settings.aiVoiceEnabled
     val list = settings.voiceProviders
     val selected = list.firstOrNull { it.id == selectedId }
     val readyCount = list.count { it.ready }
+
+    // Fetched voices open as a full voice picker: search, gender, a speaker button to hear each one.
+    if (picks.isNotEmpty() && picksFor == "voice" && selected != null && !selected.locked) {
+        val target = selected
+        androidx.activity.compose.BackHandler { picks = emptyList(); fetchNote = "" }
+        VoicePicker(
+            title = "Voice",
+            items = picks.map { PickItem(it.value, it.label, it.sub, it.tag) }.distinctBy { it.id },
+            selected = target.extra.trim(),
+            palette = palette,
+            loading = pickerLoading,
+            status = "",
+            onRefresh = { scope.launch { pickerLoading = true; onFetchVoices(target).onSuccess { r -> picks = r }; pickerLoading = false } },
+            onSelect = { v -> settings.updateVoiceProvider(target.id) { p -> p.copy(extra = v.id) } },
+            onPreview = { v -> onPreviewVoice(target, v.id) },
+            onDone = { picks = emptyList(); fetchNote = "" }
+        )
+        return
+    }
 
     Column(
         Modifier
@@ -118,7 +139,7 @@ fun AiVoiceScreen(
         Spacer(Modifier.height(12.dp))
                 SmallAction("USE FREE EDGE VOICES", true, palette) {
                     settings.preferVoiceProvider("v_edge")
-                    selectedId = "v_edge"; picks = emptyList(); fetchNote = "EDGE IS NOW FIRST. TAP FETCH VOICES TO PICK ONE."
+                    selectedId = "v_edge"; picks = emptyList(); fetchNote = "EDGE IS NOW FIRST. TAP CHOOSE A VOICE."
                 }
                 
         Box(Modifier.fillMaxWidth()) {
@@ -214,7 +235,7 @@ Spacer(Modifier.height(16.dp))
                                 }
                                 Field("VOICE", selected.extra, palette) { v -> settings.updateVoiceProvider(selected.id) { it.copy(extra = v) } }
                                 Spacer(Modifier.height(8.dp))
-                                FetchButton(if (fetching == "voice") "…" else "FETCH VOICES", palette) {
+                                FetchButton(if (fetching == "voice") "…" else "CHOOSE A VOICE", palette) {
                                     if (fetching.isEmpty()) {
                                         fetching = "voice"; fetchNote = ""; picks = emptyList(); filter = ""
                                         val target = selected
@@ -234,7 +255,7 @@ Spacer(Modifier.height(16.dp))
                         if (selected.locked) Blocker(Modifier.matchParentSizeCompat(this))
                     }
 
-                    if (picks.isNotEmpty() && !selected.locked) {
+                    if (picks.isNotEmpty() && picksFor == "model" && !selected.locked) {
                         Spacer(Modifier.height(12.dp))
                         val shown = if (filter.isBlank()) picks else picks.filter { it.label.contains(filter.trim(), ignoreCase = true) }
                         Card(palette) {

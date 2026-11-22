@@ -1,5 +1,6 @@
 package com.demon.nothingassistant.audio
 
+import java.io.File
 import android.content.Context
 import com.demon.nothingassistant.debug.AppLog
 import android.os.Handler
@@ -74,6 +75,33 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
         neural.load(model, manager.dirFor(model))
     }
 
+    fun previewCloudVoice(p: com.demon.nothingassistant.data.Provider, voice: String) { neural.stop(); system.stop(); cloud.previewVoice(p, voice) }
+
+    /** "female", "male" or "" when it can't be told. The person's own choice wins; otherwise it is read from the voice in use. */
+    fun gender(): String {
+        when (settings.voiceGender) { "female", "male" -> return settings.voiceGender }
+        fun fromName(n: String): String {
+            val t = n.lowercase()
+            return when {
+                t.contains("female") || t.contains("woman") -> "female"
+                t.contains("male") || t.contains(" man") -> "male"
+                Regex("(^|[^a-z])f\\d").containsMatchIn(t) -> "female"
+                Regex("(^|[^a-z])m\\d").containsMatchIn(t) -> "male"
+                else -> ""
+            }
+        }
+        if (cloud.configured()) {
+            val p = settings.voiceProviders.firstOrNull { it.ready } ?: return ""
+            if (p.baseUrl.startsWith(EdgeTts.URL_PREFIX)) return EdgeTts.genderOf(File(context.cacheDir, "cloud_voice"), p.extra).lowercase()
+            return fromName(p.extra)
+        }
+        if (settings.voiceEngine == "neural") {
+            val m = VoiceCatalog.byId(settings.voiceModelId) ?: return ""
+            return fromName(m.voices.firstOrNull { it.second == settings.voiceSid }?.first.orEmpty())
+        }
+        return fromName(settings.deviceVoice)
+    }
+
     fun deviceVoices() = system.deviceVoices()
     fun previewDeviceVoice(name: String) { neural.stop(); system.preview(name) }
 
@@ -92,7 +120,13 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
 
     override fun speak(raw: String, onDone: () -> Unit) = speak(raw, {}, onDone)
 
-    override fun speak(raw: String, onStart: () -> Unit, onDone: () -> Unit) {
+    private val barge = BargeIn(context)
+    /** Called when the person speaks over the assistant's voice (speak-to-interrupt). */
+    var onBargeIn: (() -> Unit)? = null
+
+    override fun speak(raw: String, onStart0: () -> Unit, onDone0: () -> Unit) {
+        val onStart = { if (settings.interrupt && onBargeIn != null) barge.start { barge.stop(); onBargeIn?.invoke() }; onStart0() }
+        val onDone = { barge.stop(); onDone0() }
         // Google's closing "ding" can land just after the result: hold our first word back (at most 0.7 s) until the quiet window ends.
         val wait = Cue.guardLeft().coerceAtMost(700)
         if (wait > 80) main.postDelayed({ speakNow(raw, onStart, onDone) }, wait) else speakNow(raw, onStart, onDone)
@@ -135,6 +169,7 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
     suspend fun testCloud(p: com.demon.nothingassistant.data.Provider): String = cloud.test(p)
 
     override fun stop() {
+        barge.stop()
         cloud.stop()
         neural.stop()
         system.stop()

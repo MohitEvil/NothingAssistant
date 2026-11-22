@@ -37,6 +37,8 @@ object EdgeTts {
     @Volatile private var buildAt = 0L
 
     class Voice(val shortName: String, val locale: String, val localeName: String, val gender: String) {
+        /** "en-US-AriaNeural" -> "Aria"; multilingual ones keep the marker. */
+        val name: String get() = shortName.split('-').drop(2).joinToString("-").removeSuffix("Neural").ifBlank { shortName }
         val label: String get() = shortName.split('-').drop(2).joinToString("-").removeSuffix("Neural") + "  ·  " + localeName.ifBlank { locale } + (if (gender.isNotBlank()) "  ·  $gender" else "")
     }
 
@@ -100,6 +102,13 @@ object EdgeTts {
             }
         } catch (_: Exception) { }
     }
+
+    /** Gender of a voice from the cached list, without touching the network. "" when unknown. */
+    fun genderOf(cache: File, short: String): String = runCatching {
+        val arr = JSONArray(File(cache, "edge_voices.json").readText())
+        for (i in 0 until arr.length()) { val o = arr.getJSONObject(i); if (o.optString("ShortName") == short) return@runCatching o.optString("Gender") }
+        ""
+    }.getOrDefault("")
 
     /** All Edge voices: [shortName, locale, language name, gender]. Cached on disk for a day. */
     fun voices(cache: File): List<Voice> {

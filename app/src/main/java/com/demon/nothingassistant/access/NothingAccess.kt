@@ -1,5 +1,6 @@
 package com.demon.nothingassistant.access
 
+import kotlinx.coroutines.launch
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.ComponentName
@@ -37,6 +38,9 @@ class NothingAccess : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default).launch {
+            com.demon.nothingassistant.priv.AutoGrant.keepAssistant(applicationContext, 4)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}

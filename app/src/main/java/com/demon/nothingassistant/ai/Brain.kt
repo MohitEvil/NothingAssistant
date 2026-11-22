@@ -27,22 +27,31 @@ class Brain(private val settings: Settings) {
 
     private class Reply(val code: Int, val body: String)
 
+    /** "female", "male" or "" : the gender of the voice that speaks the replies. Set by the controller. */
+    var genderProvider: () -> String = { "" }
+
+    private fun genderClause(): String = when (genderProvider()) {
+        "female" -> " Your spoken voice is female, so speak as a woman: in English refer to yourself naturally as a woman would, and in Hindi or Hinglish always use feminine forms for yourself (main karti hoon, bolti hoon, kar rahi hoon, meri, ...), never masculine ones."
+        "male" -> " Your spoken voice is male, so speak as a man: in Hindi or Hinglish always use masculine forms for yourself (main karta hoon, bolta hoon, kar raha hoon, mera, ...), never feminine ones."
+        else -> ""
+    }
+
     fun configured(): Boolean = settings.aiEnabled && settings.providers.any { it.ready }
 
     /** Tries each ready provider in order and uses the first that answers. */
-    suspend fun ask(history: List<Turn>, userText: String, system: String? = null): Result<String> {
+    suspend fun ask(history: List<Turn>, userText: String, system: String? = null, image: String? = null): Result<String> {
         var last: Result<String> = Result.failure(BrainException("No AI provider is set up."))
         for (p in settings.providers.toList().filter { it.ready }) {
-            val r = askOne(p, history, userText, system)
+            val r = askOne(p, history, userText, system, image)
             if (r.isSuccess) return r
             last = r
         }
         return last
     }
 
-    suspend fun askOne(p: Provider, history: List<Turn>, userText: String, system: String? = null): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun askOne(p: Provider, history: List<Turn>, userText: String, system: String? = null, image: String? = null): Result<String> = withContext(Dispatchers.IO) {
         try {
-            Result.success(call(p, history, userText, system))
+            Result.success(call(p, history, userText, system, image))
         } catch (e: CancellationException) {
             throw e
         } catch (e: BrainException) {
@@ -114,16 +123,23 @@ class Brain(private val settings: Settings) {
         }
     }
 
-    private fun call(p: Provider, history: List<Turn>, userText: String, systemOverride: String? = null): String {
+    private fun call(p: Provider, history: List<Turn>, userText: String, systemOverride: String? = null, image: String? = null): String {
         val base = p.baseUrl.trim().trimEnd('/')
         val anthropic = p.id == "anthropic" || base.contains("anthropic.com")
         val thinking = settings.aiThinking
-        val system = systemOverride ?: systemPrompt()
+        val system = (systemOverride ?: systemPrompt()) + genderClause()
 
         val messages = JSONArray()
         if (!anthropic) messages.put(msg("system", system))
         history.takeLast(10).forEach { messages.put(msg(it.role, it.text)) }
-        messages.put(msg("user", userText))
+        if (image == null) messages.put(msg("user", userText))
+        else {
+            val parts = JSONArray()
+            if (anthropic) parts.put(JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", "image/jpeg").put("data", image)))
+            else parts.put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:image/jpeg;base64,$image")))
+            parts.put(JSONObject().put("type", "text").put("text", userText))
+            messages.put(JSONObject().put("role", "user").put("content", parts))
+        }
 
         // Thinking tokens count against the limit, so leave plenty of room or answers get cut off mid-sentence.
         val room = if (thinking) 4096 else 1024
@@ -337,7 +353,8 @@ class Brain(private val settings: Settings) {
             "reply the same way, using Devanagari only if they did (unless the persona above says how to write Hindi). " +
             "Be honest when you don't know something. " +
             "Phone actions such as the flashlight, apps, timers, alarms, calls and texts are handled by the phone separately, " +
-            "so never claim you did one. You have no live internet, so say so for news, scores or prices. " +
+            "so never claim you did one. The phone can also restart or shut down, run system commands and operate other apps by looking at the screen (it asks the user to confirm anything risky), " +
+            "so never tell the user that you can't do such a thing: say you'll do it, or ask them to repeat the command. You have no live internet, so say so for news, scores or prices. " +
             "Current date and time: $now."
     }
 }

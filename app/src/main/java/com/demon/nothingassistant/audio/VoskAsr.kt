@@ -20,14 +20,18 @@ import java.util.zip.ZipInputStream
 import kotlin.math.log10
 import kotlin.math.sqrt
 
-/** Offline speech models (Vosk). Small ones, about 40 MB each, downloaded once. */
-enum class VoskLang(val id: String, val tag: String, val title: String, val size: String, val url: String) {
-    EN_IN("en-in", "en-IN", "English (India)", "about 36 MB", "https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip"),
-    EN_US("en-us", "en-US", "English (US)", "about 40 MB", "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"),
-    HI("hi", "hi-IN", "Hindi", "about 42 MB", "https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip");
+/** One offline speech model (Vosk). Built-in ones plus any language from the online catalog. */
+data class VoskLang(val id: String, val tag: String, val title: String, val size: String, val url: String) {
+    /** Language part only: "en-IN" -> "en". */
+    val base: String get() = tag.substringBefore('-').lowercase()
 
     companion object {
-        fun forTag(tag: String): VoskLang = values().firstOrNull { it.tag.equals(tag, true) } ?: if (tag.startsWith("hi", true)) HI else EN_IN
+        val BUILTIN = listOf(
+            VoskLang("en-in", "en-IN", "English (India)", "about 36 MB", "https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip"),
+            VoskLang("en-us", "en-US", "English (US)", "about 40 MB", "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"),
+            VoskLang("hi", "hi-IN", "Hindi", "about 42 MB", "https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip")
+        )
+        fun values(): List<VoskLang> = BUILTIN
     }
 }
 
@@ -40,16 +44,72 @@ class VoskAsr(private val context: Context) {
     private val root = File(context.filesDir, "vosk").apply { mkdirs() }
     val states = mutableStateMapOf<String, InstallState>()
     private val models = HashMap<String, Model>()
+    private val prefs = context.getSharedPreferences("nothing_settings", Context.MODE_PRIVATE)
+
+    /** The online list of languages (filled by [fetchCatalog]). */
+    val catalog = androidx.compose.runtime.mutableStateListOf<VoskLang>()
+    val catalogStatus = androidx.compose.runtime.mutableStateOf("")
+    private val custom = androidx.compose.runtime.mutableStateListOf<VoskLang>()
 
     @Volatile private var gen = 0
     @Volatile private var finishNow = false
 
-    init { VoskLang.values().forEach { states[it.id] = InstallState(if (installed(it)) InstallPhase.INSTALLED else InstallPhase.NOT_INSTALLED) } }
+    init {
+        loadCustom()
+        (VoskLang.BUILTIN + custom).forEach { states[it.id] = InstallState(if (installed(it)) InstallPhase.INSTALLED else InstallPhase.NOT_INSTALLED) }
+    }
+
+    private fun loadCustom() {
+        custom.clear()
+        root.listFiles()?.filter { it.isDirectory && File(it, ".ok").exists() && File(it, "meta.json").exists() }?.forEach { d ->
+            runCatching {
+                val j = JSONObject(File(d, "meta.json").readText())
+                if (VoskLang.BUILTIN.none { it.id == d.name }) custom.add(VoskLang(d.name, j.getString("tag"), j.getString("title"), j.optString("size"), j.optString("url")))
+            }
+        }
+    }
+
+    /** Every model that is downloaded on this phone (built-in or from the catalog). */
+    fun installedModels(): List<VoskLang> = (VoskLang.BUILTIN + custom).filter { installed(it) }
+
+    /** Reads the official list of small models and offers every language in it. */
+    fun fetchCatalog() {
+        catalogStatus.value = "LOADING…"
+        Thread {
+            try {
+                val conn = URL("https://alphacephei.com/vosk/models/model-list.json").openConnection() as HttpURLConnection
+                conn.connectTimeout = 15_000; conn.readTimeout = 20_000
+                val text = try { conn.inputStream.bufferedReader().readText() } finally { conn.disconnect() }
+                val arr = org.json.JSONArray(text)
+                val byLang = LinkedHashMap<String, VoskLang>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    if (o.optString("obsolete") == "true" || o.optString("type") != "small") continue
+                    val lang = o.optString("lang"); val url = o.optString("url"); val name = o.optString("name")
+                    if (lang.isBlank() || url.isBlank()) continue
+                    if (VoskLang.BUILTIN.any { it.url == url }) continue
+                    val tag = if (lang.contains('-')) lang.substringBefore('-') + "-" + lang.substringAfter('-').uppercase() else lang
+                    val size = o.optString("size_text").ifBlank { "" }.let { if (it.isBlank()) "" else "about $it" }
+                    val title = o.optString("lang_text").ifBlank { lang }
+                    byLang[lang] = VoskLang(name.removePrefix("vosk-model-"), tag, title, size, url)
+                }
+                val list = byLang.values.sortedBy { it.title }
+                main.post {
+                    catalog.clear(); catalog.addAll(list)
+                    list.forEach { if (states[it.id] == null) states[it.id] = InstallState(if (installed(it)) InstallPhase.INSTALLED else InstallPhase.NOT_INSTALLED) }
+                    catalogStatus.value = if (list.isEmpty()) "NOTHING FOUND" else ""
+                }
+            } catch (e: Exception) {
+                AppLog.e("vosk", "catalog failed", e)
+                main.post { catalogStatus.value = "NO INTERNET. TAP REFRESH." }
+            }
+        }.start()
+    }
 
     private fun dir(l: VoskLang) = File(root, l.id)
     private fun marker(l: VoskLang) = File(dir(l), ".ok")
     fun installed(l: VoskLang) = marker(l).exists()
-    fun anyInstalled() = VoskLang.values().any { installed(it) }
+    fun anyInstalled() = installedModels().isNotEmpty()
 
     /** The model folder inside the unpacked download (the one that holds "am"). */
     private fun modelRoot(l: VoskLang): File? = dir(l).walkTopDown().firstOrNull { it.isDirectory && File(it, "am").isDirectory }
@@ -67,7 +127,9 @@ class VoskAsr(private val context: Context) {
                 unzip(part, d)
                 part.delete()
                 if (modelRoot(l) == null) throw IOException("The download was incomplete. Try again.")
+                File(d, "meta.json").writeText(JSONObject().put("tag", l.tag).put("title", l.title).put("size", l.size).put("url", l.url).toString())
                 marker(l).writeText("ok")
+                main.post { if (VoskLang.BUILTIN.none { it.id == l.id } && custom.none { it.id == l.id }) custom.add(l) }
                 states[l.id] = InstallState(InstallPhase.INSTALLED)
                 AppLog.d("vosk", "${l.id} installed")
             } catch (e: Exception) {
@@ -85,6 +147,7 @@ class VoskAsr(private val context: Context) {
     fun delete(l: VoskLang) {
         models.remove(l.id)?.let { runCatching { it.close() } }
         dir(l).deleteRecursively()
+        custom.removeAll { it.id == l.id }
         states[l.id] = InstallState(InstallPhase.NOT_INSTALLED)
     }
 
@@ -129,12 +192,28 @@ class VoskAsr(private val context: Context) {
 
     // ---- Listening ----
 
+    /** The model for this language tag, or null. Exact tag first, then the same language (en-GB -> en-IN). */
+    private fun pick(tag: String, from: List<VoskLang>): VoskLang? =
+        from.firstOrNull { it.tag.equals(tag, true) } ?: from.firstOrNull { it.base == tag.substringBefore('-').lowercase() }
+
+    /** A loaded model for the language (or any installed one), for the wake word. Null when none is downloaded. */
+    fun modelFor(tag: String): Model? {
+        val have = installedModels()
+        val m = pick(tag, have) ?: pick("en", have) ?: have.firstOrNull() ?: return null
+        return runCatching { model(m) }.getOrNull()
+    }
+
     fun start(languageTag: String, l: SpeechEngine.Listener) {
         cancel()
         val my = ++gen
         finishNow = false
-        val lang = VoskLang.forTag(languageTag).let { if (installed(it)) it else VoskLang.values().firstOrNull { x -> installed(x) } ?: it }
-        Thread { runCatching { listen(lang, l, my) }.onFailure {
+        val have = installedModels()
+        val primary = pick(languageTag, have) ?: have.firstOrNull()
+        if (primary == null) { l.onError(SpeechEngine.ERROR_NOMODEL); return }
+        // Bilingual: also listen with a model of another language and keep whichever understood better.
+        val second = if (prefs.getBoolean("bilingual", true)) have.firstOrNull { it.base != primary.base } else null
+        val langs = listOfNotNull(primary, second)
+        Thread { runCatching { listen(langs, l, my) }.onFailure {
             AppLog.e("vosk", "listen failed", it)
             post(my) { l.onError(SpeechEngine.ERROR_ENGINE) }
         } }.apply { isDaemon = true }.start()
@@ -146,22 +225,35 @@ class VoskAsr(private val context: Context) {
 
     private fun textOf(json: String, key: String) = runCatching { JSONObject(json).optString(key, "") }.getOrDefault("").trim()
 
+    /** Text and how sure the model was (sum of word confidences). */
+    private fun scored(json: String): Pair<String, Float> = runCatching {
+        val o = JSONObject(json)
+        val t = o.optString("text", "").trim()
+        val arr = o.optJSONArray("result")
+        var sc = 0f
+        if (arr != null) for (i in 0 until arr.length()) sc += arr.getJSONObject(i).optDouble("conf", 0.5).toFloat()
+        else if (t.isNotEmpty()) sc = t.split(' ').size * 0.5f
+        t to sc
+    }.getOrDefault("" to 0f)
+
     @SuppressLint("MissingPermission")
-    private fun listen(lang: VoskLang, l: SpeechEngine.Listener, my: Int) {
-        val rec = Recognizer(model(lang), 16000f)
+    private fun listen(langs: List<VoskLang>, l: SpeechEngine.Listener, my: Int) {
+        val recs = langs.map { Recognizer(model(it), 16000f).also { r -> runCatching { r.setWords(true) } } }
+        fun closeAll() = recs.forEach { runCatching { it.close() } }
         val sr = 16000
         val minBuf = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val ar = AudioRecord(MediaRecorder.AudioSource.MIC, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, sr))
-        if (ar.state != AudioRecord.STATE_INITIALIZED) { ar.release(); rec.close(); post(my) { l.onError(9) }; return }
+        if (ar.state != AudioRecord.STATE_INITIALIZED) { ar.release(); closeAll(); post(my) { l.onError(9) }; return }
         val shorts = ShortArray(1600)
         var lastPartial = ""
-        var final = ""
         var speech = false
+        var done = false
+        val finals = arrayOfNulls<Pair<String, Float>>(recs.size)
         var agc = 0f
         val started = System.currentTimeMillis()
         try {
             ar.startRecording()
-            while (my == gen && !finishNow) {
+            while (my == gen && !finishNow && !done) {
                 val n = ar.read(shorts, 0, shorts.size)
                 if (n <= 0) continue
                 var peak = 0
@@ -177,13 +269,14 @@ class VoskAsr(private val context: Context) {
                 val lvl = ((20 * log10(rms + 1e-6f) + 48f) / 36f).coerceIn(0f, 1f)
                 post(my) { l.onRms(lvl * 12f - 2f) }
 
-                if (rec.acceptWaveForm(shorts, n)) {
-                    val t = textOf(rec.result, "text")
-                    if (t.isNotEmpty()) { final = t; speech = true; break }
-                } else {
-                    val p = textOf(rec.partialResult, "partial")
-                    if (p.isNotEmpty()) { speech = true; if (p != lastPartial) { lastPartial = p; post(my) { l.onPartial(p) } } }
+                var partial = ""
+                for ((i, r) in recs.withIndex()) {
+                    if (r.acceptWaveForm(shorts, n)) {
+                        val sc = scored(r.result)
+                        if (sc.first.isNotEmpty()) { finals[i] = sc; speech = true; done = true }
+                    } else { val p = textOf(r.partialResult, "partial"); if (p.length > partial.length) partial = p }
                 }
+                if (partial.isNotEmpty()) { speech = true; if (partial != lastPartial) { lastPartial = partial; post(my) { l.onPartial(partial) } } }
                 val now = System.currentTimeMillis()
                 if (!speech && now - started > 8000) break
                 if (now - started > 25000) break
@@ -192,11 +285,12 @@ class VoskAsr(private val context: Context) {
             runCatching { ar.stop() }
             ar.release()
         }
-        if (my != gen) { rec.close(); return }
-        if (final.isEmpty()) final = textOf(rec.finalResult, "text").ifEmpty { lastPartial }
-        rec.close()
-        AppLog.d("vosk", "lang=${lang.id} heard='$final'")
-        val out = final.trim()
+        if (my != gen) { closeAll(); return }
+        // The model that finished first returned its sentence via acceptWaveForm; finalResult gives every model's best.
+        val best = recs.mapIndexed { i, r -> finals[i] ?: scored(r.finalResult) }.maxByOrNull { it.second }
+        closeAll()
+        val out = (best?.first.orEmpty().ifEmpty { lastPartial }).trim()
+        AppLog.d("vosk", "langs=${langs.joinToString { it.id }} heard='$out'")
         post(my) { if (out.isBlank()) l.onError(7) else l.onFinal(out) }
     }
 

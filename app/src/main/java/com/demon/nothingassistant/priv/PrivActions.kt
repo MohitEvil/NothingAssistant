@@ -52,16 +52,32 @@ class PrivActions(
         "CLEAR_DATA" -> clearData(c)
         "ANIMATIONS" -> animations(c.a == "on")
         "KILL_ALL" -> needPriv("close all background apps") ?: sh("am kill-all", "Closed the background apps.")
-        "REBOOT" -> confirmThen(c, "Restart the phone?", "Restart the phone now?") { needPriv("restart the phone") ?: sh("reboot", "Restarting.") }
-        "SHELL" -> confirmThen(c, "Run this command?", "Run the command ${c.a}?", c.a) {
-            needPriv("run commands") ?: Priv.sh(c.a, 30).let { r ->
-                val t = r.text.take(300).ifBlank { if (r.ok) "Done, no output." else "It failed with code ${r.code}." }
-                if (r.ok) ActionResult.Success(t) else ActionResult.Failure(t)
+        "REBOOT" -> confirmThen(c, "Restart the phone?", "Restart the phone now?") { needPriv("restart the phone") ?: sh("svc power reboot || reboot", "Restarting.") }
+        "POWEROFF" -> confirmThen(c, "Shut down the phone?", "Shut the phone down now?") { needPriv("shut the phone down") ?: sh("reboot -p || svc power shutdown", "Shutting down.") }
+        "REBOOT_RECOVERY" -> confirmThen(c, "Restart into recovery?", "Restart into recovery mode?") { needPriv("restart into recovery") ?: sh("reboot recovery", "Restarting into recovery.") }
+        "REBOOT_BOOTLOADER" -> confirmThen(c, "Restart into bootloader?", "Restart into the bootloader?") { needPriv("restart into the bootloader") ?: sh("reboot bootloader", "Restarting into the bootloader.") }
+        "SHELL" -> {
+            val go: suspend () -> ActionResult = {
+                needPriv("run commands") ?: Priv.sh(c.a, 30).let { r ->
+                    val t = r.text.take(300).ifBlank { if (r.ok) "Done, no output." else "It failed with code ${r.code}." }
+                    if (r.ok) ActionResult.Success(t) else ActionResult.Failure(t)
+                }
             }
+            // Guardian: harmless commands run straight away; anything that deletes, resets, wipes, uninstalls or powers off asks first.
+            if (!dangerous(c.a)) go() else confirmThen(c, "Run this command?", "Run the command ${c.a}?", c.a, go)
         }
         "TAP" -> needPriv("tap exact coordinates") ?: sh("input tap " + c.a.replace(",", " "), "Tapped.")
         else -> ActionResult.Failure("I don't know that system action.")
     }
+
+    private val risky = Regex(
+        "(^|[\\s;&|(`])(rm|rmdir|dd|mkfs\\S*|format|wipe\\S*|reboot|shutdown|poweroff|halt|su|chmod|chown|mv|truncate|killall|setprop|resetprop|fastboot|flash\\S*|bmgr)(\\s|$)" +
+            "|pm\\s+(uninstall|clear|disable\\S*|suspend|reset-permissions|revoke)|cmd\\s+package\\s+(uninstall|clear|disable\\S*)|settings\\s+(put|delete)\\s+global" +
+            "|factory|--wipe|>\\s*/|content\\s+(delete|update)|am\\s+force-stop|sm\\s+(partition|format)|svc\\s+(power|data\\s+disable)|wm\\s+(size|density)\\s+reset|cmd\\s+(role|appops)\\s+(remove|set)"
+    , RegexOption.IGNORE_CASE)
+
+    /** True when a shell command could delete, reset or break something, so the Guardian must ask first. */
+    fun dangerous(cmd: String): Boolean = risky.containsMatchIn(cmd)
 
     private fun needPriv(doing: String): ActionResult? =
         if (Priv.available()) null else ActionResult.Failure("To $doing I need Shizuku or root. Turn one on in Settings, under Advanced access. Everything else works without it.")

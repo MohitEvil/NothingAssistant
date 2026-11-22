@@ -69,6 +69,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        runCatching { com.demon.nothingassistant.priv.AutoGrant.noteAssistant(this) }
+        runCatching { if (settings.wakeWord && !com.demon.nothingassistant.service.WakeService.running) com.demon.nothingassistant.service.WakeService.start(this) }
         resumed = true
     }
 
@@ -229,6 +231,7 @@ class MainActivity : ComponentActivity() {
                 onTestVoice = controller::testVoiceProvider,
                 onFetchModels = controller::fetchVoiceModels,
                 onFetchVoices = controller::fetchVoiceVoices,
+                onPreviewVoice = { p, v -> controller.voice.previewCloudVoice(p, v) },
                 onOpenChatTab = { showAiVoice = false; showAi = true },
                 onClose = { showAiVoice = false }
             )
@@ -249,6 +252,7 @@ class MainActivity : ComponentActivity() {
                 voice = controller.voice,
                 palette = palette,
                 onOpenLog = { showLog = true },
+                onOpenAiVoice = { showVoice = false; showAiVoice = true },
                 onClose = { showVoice = false }
             )
         } else if (showSettings) {

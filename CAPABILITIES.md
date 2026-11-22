@@ -210,3 +210,15 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Free online voices: "EDGE FREE" voice provider (Microsoft Edge Read Aloud, 350+ neural voices, no key). AI settings > AI Voice has USE FREE EDGE VOICES and FETCH VOICES (searchable). Falls back to the offline voice if the service fails.
 - Phone voices: Voice page lists every voice the phone's speech engine has installed (auto-detected), with search, LOCAL / NEEDS INTERNET tags, a PLAY preview and AUTOMATIC.
 - Live mode (Settings > Live mode): hands-free spoken conversation with transcript, pause/resume, tap to interrupt, typed messages, and the same commands and AI as the normal assistant.
+
+## Round 6
+
+- **Voice settings** is now a short list of pages: Speech recognition (with its own Offline languages page), Voices (phone voices, downloadable offline voices, online voices, speed), Wake word and Behaviour. Downloads live only inside the page they belong to.
+- **Voice picker** (title + refresh, search, count, radio rows with name / gender / Multi tag, speaker preview, Done) is used for phone voices and for fetched online voices (Edge and other AI voice providers).
+- **Languages on this phone**: only languages that are really downloaded are listed (Android 13+ on-device packs plus every Vosk model). Offline languages come from Vosk's online model list, so any language can be added.
+- **Bilingual Vosk**: two models listen to the same audio and the more confident result wins (Settings: Understand two languages).
+- **AI**: replies follow the voice's gender (detected from the Edge voice / speaker name, or set manually), including Hindi verb forms. New `power_control` tool (restart, shut down, recovery, bootloader); `run_shell` has full system access with a Guardian: harmless commands run, anything that deletes, resets or wipes asks first. Broader "restart / reboot / shut down" phrases (also Hinglish).
+- **Screen vision**: for requests about the screen, and at every step of the screen agent, a screenshot is sent to the AI (toggle: AI sees the screen). "What's on my screen?" is answered from a screenshot.
+- **Default assistant after restart**: re-applied at boot (BootReceiver, app start, accessibility connect) through WRITE_SECURE_SETTINGS (granted once by Shizuku/root) or Shizuku/root, only if you had chosen this app.
+- **Speak to interrupt**: while a reply is spoken the microphone (echo-cancelled) watches for your voice; speaking over it stops the voice and listens.
+- **Wake word**: optional foreground service, volume gate + phrase-only Vosk recogniser, training by recording the phrase three times, sensitivity.

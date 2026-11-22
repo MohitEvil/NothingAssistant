@@ -52,11 +52,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val haptics = HapticController(context, settings)
     val actions = ActionEngine(context)
-        .also { it.musicApp = { settings.musicApp }; it.videoApp = { settings.videoApp }; it.brainProvider = { brain } }
+        .also { it.musicApp = { settings.musicApp }; it.videoApp = { settings.videoApp }; it.brainProvider = { brain }; it.visionProvider = { settings.aiVision } }
     /** Offline neural voice, with the device voice as a fallback. Also used by the Voice settings screen. */
     val voice = VoiceHub(context, settings)
-    private val brain = Brain(settings)
-    private val planner = com.demon.nothingassistant.agent.Planner(context, brain)
+    private val brain = Brain(settings).also { it.genderProvider = { voice.gender() } }
+    private val planner = com.demon.nothingassistant.agent.Planner(context, brain).also { it.vision = { settings.aiVision } }
 
     // ---- Live mode: a hands-free spoken conversation that keeps listening after every answer ----
     class LiveLine(val user: Boolean, val text: String)
@@ -224,6 +224,16 @@ class AssistantController(private val context: Context, val settings: Settings) 
             AssistantState.SPEAKING -> beginListening(Mode.FOLLOWUP) // barge-in: stop talking, listen
             AssistantState.CONFIRMING ->
                 if (micActive) speech.stopListening() else beginListening(Mode.CONFIRM)
+            else -> Unit
+        }
+    }
+
+    /** The person spoke over the assistant's voice: stop talking and listen. */
+    fun bargeIn() {
+        when (_ui.value.state) {
+            AssistantState.SPEAKING -> beginListening(Mode.FOLLOWUP)
+            AssistantState.SUCCESS, AssistantState.FAILURE -> beginListening(Mode.COMMAND)
+            AssistantState.CONFIRMING -> if (!micActive) beginListening(Mode.CONFIRM)
             else -> Unit
         }
     }
@@ -655,6 +665,18 @@ class AssistantController(private val context: Context, val settings: Settings) 
             respond(text, small)
             return
         }
+        // "What's on my screen?": the AI is shown a screenshot and answers about it.
+        if (brain.configured() && settings.aiVision && Regex("^(?:what(?:'s| is)(?: on)?(?: my| the| this)? screen|what am i (?:looking at|seeing)|describe (?:my |the |this )?screen|explain (?:this|the) screen|(?:summari[sz]e|translate|explain) (?:this|the) (?:screen|page))$", RegexOption.IGNORE_CASE).matches(t)) {
+            val svc = com.demon.nothingassistant.access.NothingAccess.instance
+            if (svc != null) {
+                transition(AssistantState.THINKING, "Looking at the screen…", text)
+                val img = runCatching { com.demon.nothingassistant.access.Ocr.screenJpeg(svc) }.getOrNull()
+                if (img != null) {
+                    val r = brain.ask(emptyList(), text, "You are a voice assistant. The attached picture is the user's phone screen right now. Do what they ask about it in at most three short sentences, no markdown.", img).getOrNull()
+                    if (r != null) { remember(text, r); respond(text, r); return }
+                }
+            }
+        }
         val casual = com.demon.nothingassistant.ai.Banter.isCasual(text)
         var kbRef: String? = null
         if (!brain.configured() || casual) {
@@ -944,6 +966,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         actions.onProgress = { status -> transition(AssistantState.EXECUTING, status, _ui.value.transcript) }
         actions.announce = { msg -> if (settings.speakReplies && voice.available) voice.speak(msg) {} }
         voice.onNeuralReady = { prewarmVoice() }
+        voice.onBargeIn = { bargeIn() }
         if (voice.neural.phase == NeuralVoice.Phase.READY) prewarmVoice()
     }
 

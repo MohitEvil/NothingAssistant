@@ -35,6 +35,21 @@ object Ocr {
         }
     }
 
+    /** The current screen as a small JPEG (base64), to show to an AI that can see pictures. Null when a screenshot isn't possible. */
+    suspend fun screenJpeg(svc: AccessibilityService, maxSide: Int = 1100): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return withTimeoutOrNull(8000) {
+            val bmp = screenshot(svc) ?: run { kotlinx.coroutines.delay(420); screenshot(svc) } ?: return@withTimeoutOrNull null
+            val k = maxSide.toFloat() / maxOf(bmp.width, bmp.height)
+            val small = if (k < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * k).toInt(), (bmp.height * k).toInt(), true) else bmp
+            val out = java.io.ByteArrayOutputStream()
+            small.compress(Bitmap.CompressFormat.JPEG, 70, out)
+            if (small !== bmp) small.recycle()
+            bmp.recycle()
+            android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
+        }
+    }
+
     private suspend fun screenshot(svc: AccessibilityService): Bitmap? = suspendCancellableCoroutine { cont ->
         try {
             svc.takeScreenshot(Display.DEFAULT_DISPLAY, svc.mainExecutor, object : AccessibilityService.TakeScreenshotCallback {

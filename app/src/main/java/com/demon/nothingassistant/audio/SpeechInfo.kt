@@ -58,4 +58,30 @@ object SpeechInfo {
             if (!settings.langChosen) pickDefault(langs, pref)?.let { settings.setLanguageAuto(it) }
         }
     }
+
+    /** Languages whose offline speech pack is actually downloaded on this phone (Android 13+). Empty when unknown. */
+    @android.annotation.SuppressLint("NewApi")
+    fun installedOffline(context: Context, done: (List<String>) -> Unit) {
+        if (android.os.Build.VERSION.SDK_INT < 33) { done(emptyList()); return }
+        runCatching {
+            if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) { done(emptyList()); return }
+            val r = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            val main = android.os.Handler(android.os.Looper.getMainLooper())
+            r.checkRecognitionSupport(intent, { it.run() }, object : android.speech.RecognitionSupportCallback {
+                override fun onSupportResult(support: android.speech.RecognitionSupport) {
+                    val l = support.installedOnDeviceLanguages.map(::norm).filter { it.isNotBlank() }.distinct()
+                    main.post { runCatching { r.destroy() }; done(l) }
+                }
+                override fun onError(error: Int) { main.post { runCatching { r.destroy() }; done(emptyList()) } }
+            })
+        }.onFailure { done(emptyList()) }
+    }
+
+    /** "ru-RU" -> "Russian (Russia)" in the phone's language. */
+    fun niceName(tag: String): String {
+        val loc = Locale.forLanguageTag(tag.replace('_', '-'))
+        val n = loc.getDisplayName(Locale.getDefault())
+        return if (n.isNullOrBlank() || n.equals(tag, true)) tag else n
+    }
 }

@@ -110,7 +110,16 @@ object Tools {
         },
         Tool("do_in_apps", "Complete a longer job across apps by navigating their screens: order food, book a ride, reserve a table. Stops before paying.",
             listOf(Arg("goal", "string", "The whole job in plain words"))) { a -> s(a, "goal")?.let { "do this in the apps: $it" } },
-        Tool("run_shell", "Run a shell command on the phone (needs Shizuku or root; the user is asked to confirm first). Use only when no other tool fits.",
+        Tool("power_control", "Restart (reboot) the phone, shut it down, or restart into recovery or the bootloader. The user is asked to confirm first.",
+            listOf(Arg("action", "string", "restart, shutdown, recovery or bootloader", true, listOf("restart", "shutdown", "recovery", "bootloader")))) { a ->
+            when (s(a, "action")?.lowercase()) {
+                "shutdown", "power off", "poweroff" -> "shut down the phone"
+                "recovery" -> "reboot into recovery mode"
+                "bootloader", "fastboot" -> "reboot into bootloader mode"
+                else -> "restart the phone"
+            }
+        },
+        Tool("run_shell", "Run any shell command on the phone with full system access (Shizuku or root). Use it for anything no other tool covers: settings, packages, services, dumpsys, input, etc. Harmless commands run at once; anything that deletes, resets or wipes asks the user to confirm first.",
             listOf(Arg("command", "string", "The shell command"))) { a -> s(a, "command")?.let { "run the command $it" } },
         Tool("system_task", "Deep system job: audit location permissions, free up storage, clear app cache, turn animations off.",
             listOf(Arg("task", "string", "audit location permissions, storage left, clear cache, animations off", true))) { a ->
