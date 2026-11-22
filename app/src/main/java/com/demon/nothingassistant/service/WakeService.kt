@@ -87,6 +87,7 @@ class WakeService : Service() {
         val settings = (application as NothingApp).settings
         val model = WakeVoice.load(this)
         if (model == null) { AppLog.e("wake", "no trained wake word yet"); stopSelf(); return }
+        val print = com.demon.nothingassistant.audio.Voiceprint.load(this)
         val seg = WakeVoice.Segmenter { (0.5f - settings.wakeSens) * 0.01f }
         val buf = ShortArray(800) // 50 ms
         var ar: AudioRecord? = null
@@ -108,6 +109,11 @@ class WakeService : Service() {
                 val utterance = seg.push(buf, n) ?: continue
                 val f = WakeVoice.features(utterance) ?: continue
                 if (model.accepts(f, settings.wakeSens)) {
+                    // Right words: now check it is also your voice.
+                    if (settings.voiceLock && print != null) {
+                        val e = com.demon.nothingassistant.audio.Voiceprint.embed(utterance)
+                        if (e == null || !print.accepts(e, settings.wakeSens)) { AppLog.d("wake", "right words, other voice (${if (e == null) 0 else print.percent(e)}%)"); continue }
+                    }
                     AppLog.d("wake", "woke up (score ${model.score(f)} / limit ${model.threshold})")
                     closeMic()
                     onWake()
@@ -119,8 +125,10 @@ class WakeService : Service() {
 
     private fun onWake() {
         com.demon.nothingassistant.audio.Cue.listening()
+        WindowAnchor.holdAndWait(this, 60_000L) // a window must exist before Android lets us open the panel from the background
         runCatching {
-            startActivity(
+            PanelActivity.launch(
+                applicationContext,
                 Intent(this, PanelActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     .putExtra(OverlayService.EXTRA_AUTO_START, true)

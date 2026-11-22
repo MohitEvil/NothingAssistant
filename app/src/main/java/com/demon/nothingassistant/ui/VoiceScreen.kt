@@ -471,6 +471,7 @@ private fun WakePage(settings: Settings, palette: GlyphPalette, openSetup: () ->
     var tick by remember { mutableStateOf(0) }
     val trained = remember(tick) { com.demon.nothingassistant.audio.WakeVoice.ready(ctx) }
     val count = remember(tick) { com.demon.nothingassistant.audio.WakeVoice.sampleCount(ctx) }
+    val hasPrint = remember(tick) { com.demon.nothingassistant.audio.Voiceprint.ready(ctx) }
     var note by remember { mutableStateOf("") }
 
     Text(
@@ -492,14 +493,23 @@ private fun WakePage(settings: Settings, palette: GlyphPalette, openSetup: () ->
 
     Spacer(Modifier.height(22.dp))
     SectionLabel("YOUR VOICE", palette)
-    Text(if (trained) "\"${settings.wakePhrase}\" · learned from $count recordings." else "Not set up yet.", color = palette.fg, fontSize = 13.sp)
+    Text(if (trained) "\"${settings.wakePhrase}\" · Voice Match ${if (hasPrint) "is on" else "needs setting up again"}." else "Not set up yet.", color = palette.fg, fontSize = 13.sp)
     Spacer(Modifier.height(10.dp))
-    PillButton(if (trained) "TRAIN AGAIN" else "SET UP YOUR WAKE WORD", filled = true, palette = palette, modifier = Modifier.fillMaxWidth(), onClick = openSetup)
+    PillButton(if (trained) "SET UP VOICE MATCH AGAIN" else "SET UP VOICE MATCH", filled = true, palette = palette, modifier = Modifier.fillMaxWidth(), onClick = openSetup)
+    if (trained && hasPrint) {
+        Spacer(Modifier.height(12.dp))
+        Card(palette) {
+            ToggleRow("Only my voice", "Right words from someone else won't wake me", settings.voiceLock, palette) { on ->
+                settings.setVoiceLock(on)
+                if (settings.wakeWord) { WakeService.stop(ctx); WakeService.start(ctx) }
+            }
+        }
+    }
     if (trained) {
         Spacer(Modifier.height(10.dp))
         Chip("DELETE MY VOICE DATA", false, palette) {
             WakeService.stop(ctx); settings.setWakeWord(false)
-            com.demon.nothingassistant.audio.WakeVoice.clear(ctx); tick++
+            com.demon.nothingassistant.audio.WakeVoice.clear(ctx); com.demon.nothingassistant.audio.Voiceprint.clear(ctx); tick++
         }
     }
 

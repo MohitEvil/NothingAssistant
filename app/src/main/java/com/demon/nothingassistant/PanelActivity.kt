@@ -2,6 +2,7 @@ package com.demon.nothingassistant
 
 import android.Manifest
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -46,23 +47,46 @@ class PanelActivity : ComponentActivity() {
         var current: PanelActivity? = null
             private set
 
+        /** True only while the panel is really on screen (not merely alive behind another app). */
+        @Volatile
+        var visible = false
+            private set
+
         /** The floating bubble was tapped while the panel is open: stop listening and close it. Returns true if it closed one. */
         /** Closes the panel so the app underneath gets focus (used before tapping or going back in another app). */
         fun hide(): Boolean {
             val p = current ?: return false
             if (p.isFinishing || p.isDestroyed) return false
+            com.demon.nothingassistant.service.WindowAnchor.hold(p.applicationContext, 90_000L) // so the panel can come back over the other app
             p.runOnUiThread { p.finish() }
             return true
         }
 
         /** Brings the panel back over whatever app is in front, already listening-ready (used between tasks). */
         fun show(ctx: android.content.Context) {
+            val app = ctx.applicationContext
+            com.demon.nothingassistant.service.WindowAnchor.hold(app, 60_000L)
+            val i = Intent(app, PanelActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                .putExtra("quiet", true)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ launch(app, i) }, 160)
+        }
+
+        /** Starts the panel. If Android silently refuses a background start, a PendingIntent that opts in is sent as well. */
+        fun launch(app: android.content.Context, i: Intent) {
+            val ok = runCatching { app.startActivity(i) }.isSuccess
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                if (!visible && !MainActivity.resumed) viaPending(app, i)
+            }, if (ok) 900L else 0L)
+        }
+
+        private fun viaPending(app: android.content.Context, i: Intent) {
             runCatching {
-                ctx.startActivity(
-                    Intent(ctx, PanelActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-                        .putExtra("quiet", true)
-                )
+                val pi = android.app.PendingIntent.getActivity(app, 7, i, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+                if (Build.VERSION.SDK_INT >= 34) {
+                    val o = android.app.ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                    pi.send(app, 0, null, null, null, null, o.toBundle())
+                } else pi.send()
             }
         }
 
@@ -104,13 +128,19 @@ class PanelActivity : ComponentActivity() {
         return true
     }
 
+    override fun onStart() {
+        super.onStart()
+        visible = true
+    }
+
     override fun onDestroy() {
-        if (current === this) current = null
+        if (current === this) { current = null; visible = false }
         super.onDestroy()
     }
 
     override fun onStop() {
         super.onStop()
+        visible = false
         if (!handOff) controller.onUiHidden()
     }
 

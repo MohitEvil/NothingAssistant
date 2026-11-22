@@ -39,19 +39,19 @@ class Brain(private val settings: Settings) {
     fun configured(): Boolean = settings.aiEnabled && settings.providers.any { it.ready }
 
     /** Tries each ready provider in order and uses the first that answers. */
-    suspend fun ask(history: List<Turn>, userText: String, system: String? = null, image: String? = null): Result<String> {
+    suspend fun ask(history: List<Turn>, userText: String, system: String? = null, image: String? = null, big: Boolean = false): Result<String> {
         var last: Result<String> = Result.failure(BrainException("No AI provider is set up."))
         for (p in settings.providers.toList().filter { it.ready }) {
-            val r = askOne(p, history, userText, system, image)
+            val r = askOne(p, history, userText, system, image, big)
             if (r.isSuccess) return r
             last = r
         }
         return last
     }
 
-    suspend fun askOne(p: Provider, history: List<Turn>, userText: String, system: String? = null, image: String? = null): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun askOne(p: Provider, history: List<Turn>, userText: String, system: String? = null, image: String? = null, big: Boolean = false): Result<String> = withContext(Dispatchers.IO) {
         try {
-            Result.success(call(p, history, userText, system, image))
+            Result.success(call(p, history, userText, system, image, big))
         } catch (e: CancellationException) {
             throw e
         } catch (e: BrainException) {
@@ -123,7 +123,7 @@ class Brain(private val settings: Settings) {
         }
     }
 
-    private fun call(p: Provider, history: List<Turn>, userText: String, systemOverride: String? = null, image: String? = null): String {
+    private fun call(p: Provider, history: List<Turn>, userText: String, systemOverride: String? = null, image: String? = null, big: Boolean = false): String {
         val base = p.baseUrl.trim().trimEnd('/')
         val anthropic = p.id == "anthropic" || base.contains("anthropic.com")
         val thinking = settings.aiThinking
@@ -142,21 +142,21 @@ class Brain(private val settings: Settings) {
         }
 
         // Thinking tokens count against the limit, so leave plenty of room or answers get cut off mid-sentence.
-        val room = if (thinking) 4096 else 1024
+        val room = if (big) (if (thinking) 6144 else 2048) else if (thinking) 4096 else 1024
 
         val reply: Reply = if (anthropic) {
-            var r = post(p, base + "/messages", anthropicBody(p, messages, system, room, thinking), anthropic = true)
-            if (r.code == 400 && thinking) r = post(p, base + "/messages", anthropicBody(p, messages, system, room, false), anthropic = true)
+            var r = post(p, base + "/messages", anthropicBody(p, messages, system, room, thinking), anthropic = true, big = big)
+            if (r.code == 400 && thinking) r = post(p, base + "/messages", anthropicBody(p, messages, system, room, false), anthropic = true, big = big)
             r
         } else {
             val url = base + "/chat/completions"
-            var r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = false, extras = true), anthropic = false)
+            var r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = false, extras = true), anthropic = false, big = big)
             // Some models reject certain fields. Retry with gentler requests before giving up.
             if (r.code == 400 || r.code == 422) {
-                r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = true, extras = true), anthropic = false)
+                r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = true, extras = true), anthropic = false, big = big)
             }
             if (r.code == 400 || r.code == 422) {
-                r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = true, extras = false), anthropic = false)
+                r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = true, extras = false), anthropic = false, big = big)
             }
             r
         }
@@ -248,12 +248,12 @@ class Brain(private val settings: Settings) {
             m.contains("thinking") || m.contains("2.5-pro") || m.contains("gemini-3") || m.contains("qwq") || m.contains("gpt-oss")
     }
 
-    private fun post(p: Provider, url: String, body: JSONObject, anthropic: Boolean): Reply {
+    private fun post(p: Provider, url: String, body: JSONObject, anthropic: Boolean, big: Boolean = false): Reply {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 15_000
-            conn.readTimeout = 30_000
+            conn.readTimeout = if (big) 75_000 else 30_000
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             if (anthropic) {

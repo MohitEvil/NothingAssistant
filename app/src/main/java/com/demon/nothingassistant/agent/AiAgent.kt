@@ -139,17 +139,31 @@ class AiAgent(
         var lastKey = ""
         var noImage = false
         var lastSig = 0
+        var lastChangedNot = false
 
+        com.demon.nothingassistant.service.WindowAnchor.hold(ctx, 120_000L)
         for (step in 1..26) {
             if (System.currentTimeMillis() - started > 240_000) return ActionResult.Failure("I worked on it for a while and stopped. " + recap(hist))
             val svc = NothingAccess.instance
             val now = look(svc)
-            val img = if (!noImage && vision() && svc != null) runCatching { Ocr.screenJpeg(svc, 1000) }.getOrNull() else null
+            val needLook = step == 1 || now.els.size < 5 || lastChangedNot || step % 4 == 0
+            val img = if (!noImage && needLook && vision() && svc != null) runCatching { Ocr.screenJpeg(svc, 900) }.getOrNull() else null
             val q = "GOAL: $goal\nHISTORY:\n" + (if (hist.isEmpty()) "(nothing yet)" else hist.takeLast(8).joinToString("\n")) + "\n\nSCREEN NOW:\n" + now.text
-            var reply = if (img != null) b.ask(emptyList(), q, system(), img).getOrNull() else null
-            if (reply == null && img != null) noImage = true
-            if (reply == null) reply = b.ask(emptyList(), q, system()).getOrNull()
-            if (reply == null) return ActionResult.Failure("The AI didn't answer, so I stopped. " + recap(hist))
+            var reply: String? = null
+            var lastErr = ""
+            for (attempt in 1..4) {
+                val useImg = if (attempt <= 2) img else null
+                val r = b.ask(emptyList(), q, system(), useImg, big = true)
+                reply = r.getOrNull()
+                if (reply != null) break
+                lastErr = r.exceptionOrNull()?.message.orEmpty()
+                if (useImg != null && attempt == 2) noImage = true
+                AppLog.d("aiagent", "ask failed (attempt $attempt): $lastErr")
+                if (lastErr.contains("key was rejected") || lastErr.contains("No AI provider") || lastErr.contains("limit is used up")) break
+                progress(if (lastErr.contains("rate limited")) "The AI needs a breath…" else "Asking the AI again…")
+                delay(if (lastErr.contains("rate limited")) 6000L else 1200L * attempt)
+            }
+            if (reply == null) return ActionResult.Failure(friendlyAiError(lastErr) + " " + recap(hist))
             val o0 = parse(reply)
             if (o0 == null) { hist += "$step. (your reply was not valid JSON, answer with one JSON object)"; continue }
             val o: JSONObject = o0
@@ -178,10 +192,21 @@ class AiAgent(
             while (waited < 1400 && svc != null) { delay(250); waited += 250; val s2 = svc.signature(); if (s2 == after) break; after = s2 }
             val title2 = svc?.topTitle().orEmpty()
             val changed = svc != null && after != now.sig
+            lastChangedNot = svc != null && !changed
             hist += "$step. ${describe(o)}${if (o.optString("thought").isNotBlank()) " (" + o.optString("thought").take(60) + ")" else ""} -> ${out.note}; " +
                 (if (svc == null) "" else if (changed) "screen changed" + (if (title2 != now.title && title2.isNotBlank()) " to '$title2'" else "") else "screen did NOT change")
         }
         return ActionResult.Success("I worked on it as far as I could. " + recap(hist))
+    }
+
+    private fun friendlyAiError(e: String): String = when {
+        e.contains("rate limited") -> "The free AI is busy right now (rate limit). Give it a minute and ask again."
+        e.contains("took too long") -> "The AI is responding too slowly on this network. Try again."
+        e.contains("No internet") || e.contains("Network problem") -> "I couldn't reach the AI. Check the internet connection."
+        e.contains("key was rejected") -> "The AI key was rejected. Check it in AI settings."
+        e.contains("limit is used up") -> "The free AI limit is used up for now."
+        e.isNotBlank() -> "The AI had a problem: " + e.take(90)
+        else -> "The AI didn't answer."
     }
 
     private fun recap(h: List<String>) = if (h.isEmpty()) "" else "Last steps: " + h.takeLast(3).joinToString(" ") { it.substringAfter(". ").substringBefore(" ->") } + "."

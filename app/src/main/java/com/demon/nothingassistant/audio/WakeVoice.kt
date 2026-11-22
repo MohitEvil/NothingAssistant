@@ -30,9 +30,9 @@ object WakeVoice {
     private const val NMEL = 26
     private const val NCEP = 13
 
-    private val hamming = FloatArray(FRAME) { (0.54 - 0.46 * cos(2.0 * PI * it / (FRAME - 1))).toFloat() }
+    internal val hamming = FloatArray(FRAME) { (0.54 - 0.46 * cos(2.0 * PI * it / (FRAME - 1))).toFloat() }
 
-    private val melBank: Array<FloatArray> by lazy {
+    internal val melBank: Array<FloatArray> by lazy {
         fun mel(f: Double) = 2595.0 * log10(1.0 + f / 700.0)
         fun inv(m: Double) = 700.0 * (Math.pow(10.0, m / 2595.0) - 1.0)
         val lo = mel(80.0); val hi = mel(7600.0)
@@ -48,7 +48,7 @@ object WakeVoice {
 
     private val dct: Array<FloatArray> by lazy { Array(NCEP) { i -> FloatArray(NMEL) { j -> cos(PI * i * (j + 0.5) / NMEL).toFloat() } } }
 
-    private fun fft(re: FloatArray, im: FloatArray) {
+    internal fun fft(re: FloatArray, im: FloatArray) {
         val n = re.size
         var j = 0
         for (i in 1 until n) {
@@ -199,7 +199,7 @@ object WakeVoice {
     fun sampleCount(c: Context): Int = runCatching { DataInputStream(file(c).inputStream()).use { it.readFloat(); it.readInt() } }.getOrDefault(0)
 
     /** Cuts a stream of 50 ms frames into utterances. Used by the training screen and by the always-on listener. */
-    class Segmenter(private val gateBoost: () -> Float = { 0f }) {
+    class Segmenter(private val maxFrames: Int = 70, private val endSilence: Int = 9, private val gateBoost: () -> Float = { 0f }) {
         private var floor = 0.006f
         private val ring = ArrayDeque<ShortArray>()
         private val seg = ArrayList<ShortArray>()
@@ -224,7 +224,7 @@ object WakeVoice {
             }
             seg.add(frame)
             if (rms >= gate * 0.8f) { silent = 0; loud++ } else silent++
-            if (silent >= 9 || seg.size >= 70) {
+            if (silent >= endSilence || seg.size >= maxFrames) {
                 val ok = loud >= 5
                 active = false
                 val total = seg.sumOf { it.size }
@@ -238,13 +238,19 @@ object WakeVoice {
         }
     }
 
-    /** Training recorder: blocks until one utterance has been captured (or the timeout). Call from a background thread. */
+    /**
+     * Training recorder: blocks until one utterance has been captured (or the timeout). Call from a background thread.
+     * [onChunk] gets every 50 ms of audio as it arrives (for live word recognition); the live spectrum is published to [VoiceBands].
+     */
     @SuppressLint("MissingPermission")
-    fun capture(timeoutMs: Long, stop: () -> Boolean, onLevel: (Float) -> Unit): ShortArray? {
+    fun capture(
+        timeoutMs: Long, stop: () -> Boolean, maxFrames: Int = 70, endSilence: Int = 9,
+        onChunk: ((ShortArray, Int) -> Unit)? = null, onLevel: (Float) -> Unit
+    ): ShortArray? {
         val min = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val ar = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(min, SR))
         if (ar.state != AudioRecord.STATE_INITIALIZED) { ar.release(); return null }
-        val seg = Segmenter()
+        val seg = Segmenter(maxFrames, endSilence)
         val buf = ShortArray(800)
         val t0 = System.currentTimeMillis()
         try {
@@ -252,6 +258,8 @@ object WakeVoice {
             while (!stop() && System.currentTimeMillis() - t0 < timeoutMs) {
                 val n = ar.read(buf, 0, buf.size)
                 if (n <= 0) continue
+                VoiceBands.pushPcm(buf, n, SR)
+                onChunk?.invoke(buf, n)
                 val r = seg.push(buf, n)
                 onLevel(seg.level)
                 if (r != null) return r

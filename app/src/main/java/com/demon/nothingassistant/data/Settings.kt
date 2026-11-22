@@ -155,6 +155,9 @@ class Settings(context: Context) {
         private set
     var wakeSens by mutableStateOf(sp.getFloat("wake_sens", 0.5f))
         private set
+    /** Wake only for the voice that was trained in Voice Match. */
+    var voiceLock by mutableStateOf(sp.getBoolean("voice_lock", true))
+        private set
 
     /** Look: 0 plain Nothing, 1 liquid glass, 2 minimal liquid glass. */
     var glassStyle by mutableIntStateOf(sp.getInt("glass_style", 0))
@@ -374,6 +377,8 @@ class Settings(context: Context) {
     fun setWakePhrase(v: String) { wakePhrase = v.trim().lowercase(); wakeVariants = emptyList(); sp.edit().putString("wake_phrase", wakePhrase).putStringSet("wake_variants", emptySet()).apply() }
     @JvmName("applyWakeVariants")
     fun setWakeVariants(v: List<String>) { wakeVariants = v.distinct().sorted(); sp.edit().putStringSet("wake_variants", wakeVariants.toSet()).apply() }
+    @JvmName("applyVoiceLock")
+    fun setVoiceLock(v: Boolean) { voiceLock = v; sp.edit().putBoolean("voice_lock", v).apply() }
     @JvmName("applyWakeSens")
     fun setWakeSens(v: Float) { wakeSens = v; sp.edit().putFloat("wake_sens", v).apply() }
     @JvmName("applyTheme")

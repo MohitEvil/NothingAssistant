@@ -336,7 +336,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 delay(1500)
                 val st = _ui.value.state
                 if ((st == AssistantState.LISTENING || st == AssistantState.RECOGNIZING) && !liveOn.value &&
-                    com.demon.nothingassistant.PanelActivity.current == null && !com.demon.nothingassistant.MainActivity.resumed
+                    !com.demon.nothingassistant.PanelActivity.visible && !com.demon.nothingassistant.MainActivity.resumed
                 ) {
                     if (it == 0) com.demon.nothingassistant.PanelActivity.show(context) else cancel()
                 } else return@launch
@@ -523,22 +523,29 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 if (c != null) { replayPattern = pat; AppLog.d("route", "skill"); return c }
             }
         }
-        // Tier 1 and 2
+        // Tier 1 and 2: short, clear commands run instantly. With the AI on, anything longer goes to the AI first, because it understands
+        // context, mixed languages and speech-recognition slips far better than fixed patterns do.
         val vagueOpen = grammar is Command.OpenApp && (grammar.name.trim().split(Regex("\\s+")).size >= 3 || grammar.name.trim().startsWith("my ", true))
-        if (known && grammar !is Command.Chain && grammar !is Command.Task && !vagueOpen) { AppLog.d("route", "tier1/2 ${grammar.javaClass.simpleName}"); return grammar }
-        // Tier 3: Needle 3
-        val n = runCatching { planner.needle(text) }.getOrNull()?.takeIf { com.demon.nothingassistant.agent.PlanGuard.ok(text, it.command).also { ok -> if (!ok) AppLog.d("route", "needle plan rejected: not backed by the words said") } }
-        if (n != null) {
-            val better = !known || n.confidence >= 0.8 || stepCount(n.command) > stepCount(grammar)
-            if (better) { AppLog.d("route", "needle"); pendingLearn = text to n.raw; return n.command }
-        }
-        // then the cloud AI, only when the grammar didn't fully understand, or the request is long or has several steps
-        val long = text.trim().split(Regex("\\s+")).size >= 9
-        if (brain.configured() && (!known || grammar is Command.Chain || long)) {
-            transition(AssistantState.THINKING, "Planning…", text)
+        val aiOn = brain.configured()
+        val wordCount = text.trim().split(Regex("\\s+")).size
+        if (known && grammar !is Command.Chain && grammar !is Command.Task && !vagueOpen && (!aiOn || wordCount <= 5)) { AppLog.d("route", "tier1/2 ${grammar.javaClass.simpleName}"); return grammar }
+
+        suspend fun cloudPlan(): Command? {
+            if (!aiOn) return null
+            transition(AssistantState.THINKING, "Thinking…", text)
             val c = runCatching { planner.cloud(text, history.recent()) }.getOrNull()?.takeIf { com.demon.nothingassistant.agent.PlanGuard.ok(text, it.command) }
             if (c != null) { AppLog.d("route", "cloud"); pendingLearn = text to c.raw; return c.command }
+            return null
         }
+        suspend fun needlePlan(): Command? {
+            val n = runCatching { planner.needle(text) }.getOrNull()?.takeIf { com.demon.nothingassistant.agent.PlanGuard.ok(text, it.command).also { ok -> if (!ok) AppLog.d("route", "needle plan rejected: not backed by the words said") } } ?: return null
+            val better = !known || n.confidence >= 0.8 || stepCount(n.command) > stepCount(grammar)
+            if (!better) return null
+            AppLog.d("route", "needle"); pendingLearn = text to n.raw; return n.command
+        }
+        // Online with an AI: the AI plans first and Needle 3 (on the phone) is the fallback. Offline or without an AI: Needle first, as before.
+        if (aiOn) { cloudPlan()?.let { return it }; needlePlan()?.let { return it } }
+        else needlePlan()?.let { return it }
         if (known) { AppLog.d("route", "grammar"); return grammar }
         return null
     }
@@ -902,7 +909,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 // Bring the panel back while the app is still opening, so it is already there when the voice finishes.
                 if (keepOpen) scope.launch {
                     delay(450)
-                    if (token == flow && !MainActivity.resumed && PanelActivity.current == null) PanelActivity.show(context)
+                    if (token == flow && !MainActivity.resumed && !PanelActivity.visible) PanelActivity.show(context)
                 }
             }
         }
@@ -925,10 +932,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
         val t = ++flow
         speakJob?.cancel()
         speakJob = scope.launch {
-            if (!MainActivity.resumed && PanelActivity.current == null) {
+            if (!MainActivity.resumed && !PanelActivity.visible) {
                 PanelActivity.show(context)
                 var waited = 0
-                while (PanelActivity.current == null && waited < 1000) { delay(30); waited += 30 }
+                while (!PanelActivity.visible && waited < 2200) { delay(40); waited += 40 }
+                if (!PanelActivity.visible) { if (t == flow) endQuiet(); return@launch } // never listen with nothing on screen
                 delay(40)
             }
             if (t == flow) beginListening(Mode.FOLLOWUP)

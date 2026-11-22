@@ -268,6 +268,7 @@ class VoskAsr(private val context: Context) {
                 for (i in 0 until n) { val v = shorts[i] / 32768.0; sum += v * v }
                 val rms = sqrt(sum / n).toFloat()
                 val lvl = ((20 * log10(rms + 1e-6f) + 48f) / 36f).coerceIn(0f, 1f)
+                VoiceBands.pushPcm(shorts, n, sr)
                 post(my) { l.onRms(lvl * 12f - 2f) }
 
                 var partial = ""

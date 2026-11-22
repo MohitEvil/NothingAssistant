@@ -232,3 +232,11 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **Defaults**: Kilo (free AI) and Edge (free voice) are switched on once automatically.
 - **Window fix**: the panel no longer closes between tasks, and if the assistant ever listens with no window it brings the panel back or stops listening.
 - Vosk catalog also lists the more accurate big models.
+
+## Round 8
+- **Voice Match** (Voice settings → Wake word): Google/Siri-style setup. Intro, "How it works", then your phrase 5 times and 7 read-aloud sentences. Words light up as they are recognised (offline recogniser if downloaded, otherwise by speaking time), a colour wave follows your voice, each step is checked off, then "You're all set" with a live test showing a Voice Match %.
+- **Speaker check** (`audio/Voiceprint.kt`): learns the cepstral shape and pitch of your voice; the wake word only fires for you. "Only my voice" toggle in Voice settings.
+- **Blob** follows the voice: deep sounds swell the lower half, high sounds the top; it turns only as fast as you speak (`audio/VoiceBands.kt`).
+- **Window**: `service/WindowAnchor.kt` keeps a 1-pixel invisible window while the assistant works so the panel can always reopen; follow-up listening never starts without a visible panel.
+- **AI agent**: retries, longer timeout and real error messages; screenshot only when needed to save rate limit.
+- **Routing**: with an AI on, anything longer than a short clear command is planned by the AI first; Needle 3 and the fixed grammar remain the offline fallback.

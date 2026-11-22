@@ -231,6 +231,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
             started = true
             pcmPlaying = true
             runCatching { tr.play() }
+            VoiceBands.attach(tr.audioSessionId)
             onFirst()
         }
 
@@ -246,6 +247,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
         }
 
         fun close() {
+            VoiceBands.detach()
             runCatching { tr.pause(); tr.flush() }
             runCatching { tr.release() }
             if (track === tr) track = null
@@ -369,7 +371,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
                 AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
             )
             mp.setDataSource(f.absolutePath)
-            mp.setOnPreparedListener { if (my == token) { onStart(); it.start() } }
+            mp.setOnPreparedListener { if (my == token) { onStart(); VoiceBands.attach(it.audioSessionId); it.start() } }
             mp.setOnCompletionListener { if (my == token) { release(); onDone() } }
             mp.setOnErrorListener { _, _, _ -> if (my == token) { release(); onFail() }; true }
             mp.prepareAsync()
@@ -423,6 +425,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
     }
 
     private fun release() {
+        VoiceBands.detach()
         player?.let { runCatching { it.stop() }; runCatching { it.release() } }
         player = null
     }
