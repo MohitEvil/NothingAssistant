@@ -48,12 +48,16 @@ fun DotBlob(
 ) {
     val pts = remember { sphere(900) }
     val ring = remember { FloatArray(48) { (it * 2 * PI / 48).toFloat() } }
+    val smooth = remember { floatArrayOf(0f) }
     Canvas(modifier) {
         val s = size.minDimension
         val c = Offset(size.width / 2f, size.height / 2f)
         val t = if (animate) (clock.longValue % 1_000_000L) / 1000f else 0f
         val el = if (animate) ((clock.longValue - since).coerceAtLeast(0L)) / 1000f else 10f
-        val amp = if (animate) amplitude.floatValue.coerceIn(0f, 1f) else 0.2f
+        // Quick to swell with your voice, slow to settle: it breathes instead of flickering.
+        val rawAmp = if (animate) amplitude.floatValue.coerceIn(0f, 1f) else 0.2f
+        smooth[0] += (rawAmp - smooth[0]) * (if (rawAmp > smooth[0]) 0.5f else 0.10f)
+        val amp = smooth[0]
         val accent = palette.red
         val fg = palette.fg
 
@@ -78,6 +82,26 @@ fun DotBlob(
             Brush.radialGradient(listOf(accent.copy(alpha = (0.10f + 0.30f * heat) * (if (palette.isDark) 1f else 0.7f)), Color.Transparent), center = c, radius = base * 2.3f),
             base * 2.3f, c
         )
+
+        // Siri-style aurora: soft coloured lights drifting around the ball, brighter the more it is doing something.
+        val activity = when (state) {
+            AssistantState.IDLE -> 0.12f
+            AssistantState.LISTENING -> 0.35f + 0.65f * amp
+            AssistantState.SPEAKING -> 0.7f
+            AssistantState.RECOGNIZING, AssistantState.THINKING, AssistantState.EXECUTING -> 0.6f
+            else -> 0.25f
+        }
+        val auroras = listOf(accent, Color(0xFF4FC3F7), Color(0xFFB388FF))
+        for (k in 0 until 3) {
+            val ang = t * (0.55f + 0.25f * k) + k * 2.1f
+            val off = base * (0.45f + 0.25f * amp)
+            val pc = Offset(c.x + cos(ang) * off, c.y + sin(ang * 1.2f) * off * 0.8f)
+            val rad = base * (1.15f + 0.25f * k) * (1f + 0.25f * amp)
+            drawCircle(
+                Brush.radialGradient(listOf(auroras[k].copy(alpha = 0.22f * activity * (if (palette.isDark) 1f else 0.7f)), Color.Transparent), center = pc, radius = rad),
+                rad, pc
+            )
+        }
 
         val ay = t * spin
         val ax = 0.45f * sin(t * 0.5f) + 0.25f

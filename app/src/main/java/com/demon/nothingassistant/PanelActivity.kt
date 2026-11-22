@@ -147,7 +147,7 @@ class PanelActivity : ComponentActivity() {
         // Close once the conversation is over (back to idle after having been active).
         LaunchedEffect(ui.state) {
             if (ui.state != AssistantState.IDLE) seenActive = true
-            else if (seenActive) finish()
+            else if (seenActive) { kotlinx.coroutines.delay(900); finish() } // a short pause between tasks must not close the window under a listening assistant
         }
 
         BackHandler {

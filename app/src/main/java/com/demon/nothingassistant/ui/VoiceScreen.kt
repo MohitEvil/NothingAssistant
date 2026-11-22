@@ -62,6 +62,10 @@ fun VoiceScreen(
     var page by remember { mutableStateOf("hub") }
     BackHandler(enabled = page != "hub") { page = parent(page) }
 
+    if (page == "wakesetup") {
+        WakeSetup(settings, palette) { page = "wake" }
+        return
+    }
     if (page == "pickphone") {
         PhoneVoicePicker(settings, voice, palette) { page = "voices" }
         return
@@ -92,7 +96,7 @@ fun VoiceScreen(
             "vosk" -> VoskPage(palette)
             "voices" -> VoicesPage(settings, voice, palette, onOpenAiVoice, { page = "pickphone" }, { page = "neural" })
             "neural" -> NeuralPage(settings, voice, palette)
-            "wake" -> WakePage(settings, palette)
+            "wake" -> WakePage(settings, palette) { page = "wakesetup" }
             "assist" -> AssistPage(settings, voice, palette)
             else -> HubPage(settings, voice, palette, onClose) { page = it }
         }
@@ -100,7 +104,7 @@ fun VoiceScreen(
     }
 }
 
-private fun parent(page: String) = when (page) { "vosk" -> "recog"; "pickphone", "neural" -> "voices"; else -> "hub" }
+private fun parent(page: String) = when (page) { "wakesetup" -> "wake"; "vosk" -> "recog"; "pickphone", "neural" -> "voices"; else -> "hub" }
 
 @Composable
 private fun HubPage(settings: Settings, voice: VoiceHub, palette: GlyphPalette, onClose: () -> Unit, go: (String) -> Unit) {
@@ -462,84 +466,41 @@ private fun ProgressBar(progress: Float, palette: GlyphPalette) {
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun WakePage(settings: Settings, palette: GlyphPalette) {
+private fun WakePage(settings: Settings, palette: GlyphPalette, openSetup: () -> Unit) {
     val ctx = LocalContext.current
-    val vosk = VoskAsr.get(ctx)
-    val hasModel = vosk.states.values.any { it.phase == InstallPhase.INSTALLED }
-    var heard by remember { mutableStateOf(emptyList<String>()) }
-    var recording by remember { mutableStateOf(false) }
+    var tick by remember { mutableStateOf(0) }
+    val trained = remember(tick) { com.demon.nothingassistant.audio.WakeVoice.ready(ctx) }
+    val count = remember(tick) { com.demon.nothingassistant.audio.WakeVoice.sampleCount(ctx) }
     var note by remember { mutableStateOf("") }
-    var phrase by remember { mutableStateOf(settings.wakePhrase) }
-
-    fun turnOn() {
-        settings.setWakeWord(true)
-        WakeService.start(ctx)
-    }
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) turnOn() else note = "The wake word needs the microphone permission." }
 
     Text(
-        "Say a phrase like \"Hey Nothing\" and I start listening, without touching the phone. A tiny volume check runs all the time; only when someone speaks does a small recogniser that knows just your phrase listen to that short burst. Nothing is recorded or sent anywhere.",
+        "Say your phrase and I start listening, hands free. I learn your own voice, so it works for any phrase and any language, and needs no download. " +
+            "A tiny volume check runs all the time; only when someone speaks is that short burst compared with your voice. Nothing is recorded or sent anywhere.",
         color = palette.muted, fontSize = 12.sp
     )
     Spacer(Modifier.height(16.dp))
     Card(palette) {
-        ToggleRow("Wake word", if (settings.wakeWord) "Listening for \"${settings.wakePhrase}\"" else "Off", settings.wakeWord, palette) { on ->
+        ToggleRow("Wake word", if (!trained) "Set it up first" else if (settings.wakeWord) "Listening for \"${settings.wakePhrase}\"" else "Off", settings.wakeWord, palette) { on ->
             note = ""
             if (!on) { settings.setWakeWord(false); WakeService.stop(ctx) }
-            else if (!hasModel) note = "Download an offline language first: Speech recognition, then Offline languages."
-            else if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) permLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-            else turnOn()
+            else if (!trained) note = "Teach me your voice first."
+            else if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) note = "The microphone permission is needed."
+            else { settings.setWakeWord(true); WakeService.start(ctx) }
         }
     }
     if (note.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(note, color = palette.red, fontSize = 12.sp) }
 
     Spacer(Modifier.height(22.dp))
-    SectionLabel("YOUR PHRASE", palette)
-    Field("WAKE PHRASE", phrase, palette) { phrase = it }
+    SectionLabel("YOUR VOICE", palette)
+    Text(if (trained) "\"${settings.wakePhrase}\" · learned from $count recordings." else "Not set up yet.", color = palette.fg, fontSize = 13.sp)
     Spacer(Modifier.height(10.dp))
-    PillButton("SAVE PHRASE", filled = false, palette = palette, modifier = Modifier.fillMaxWidth(), onClick = {
-        val t = phrase.trim().lowercase()
-        if (t.length < 5 || !t.contains(' ')) note = "Use two or more words, for example \"hey nothing\", so it doesn't wake up by accident."
-        else {
-            note = ""
-            settings.setWakePhrase(t); heard = emptyList()
-            if (settings.wakeWord) { WakeService.stop(ctx); WakeService.start(ctx) }
-        }
-    })
-
-    Spacer(Modifier.height(22.dp))
-    SectionLabel("TRAIN YOUR VOICE", palette)
-    Text("Say your phrase three times. I note how the recogniser hears you, so it still wakes up with your accent.", color = palette.muted, fontSize = 12.sp)
-    Spacer(Modifier.height(10.dp))
-    PillButton(
-        if (recording) "LISTENING… SAY IT NOW" else if (!hasModel) "DOWNLOAD A LANGUAGE FIRST" else "RECORD (${heard.size}/3)",
-        filled = true, palette = palette, modifier = Modifier.fillMaxWidth(),
-        onClick = {
-            if (recording || !hasModel) return@PillButton
-            if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) { permLauncher.launch(android.Manifest.permission.RECORD_AUDIO); return@PillButton }
-            recording = true; note = ""
-            WakeService.paused = true
-            vosk.start(settings.language, object : SpeechEngine.Listener {
-                override fun onPartial(text: String) {}
-                override fun onRms(db: Float) {}
-                override fun onFinal(text: String) {
-                    recording = false; WakeService.paused = false
-                    val t = text.trim().lowercase()
-                    heard = heard + t
-                    val ok = heard.filter { it.length >= 5 && (it.contains(' ') || it.length >= 7) }.distinct()
-                    settings.setWakeVariants(ok.filter { it != settings.wakePhrase })
-                    if (settings.wakeWord) { WakeService.stop(ctx); WakeService.start(ctx) }
-                }
-                override fun onError(code: Int) { recording = false; WakeService.paused = false; note = "I didn't hear anything. Try again, a little closer." }
-            })
-        }
-    )
-    if (heard.isNotEmpty()) {
+    PillButton(if (trained) "TRAIN AGAIN" else "SET UP YOUR WAKE WORD", filled = true, palette = palette, modifier = Modifier.fillMaxWidth(), onClick = openSetup)
+    if (trained) {
         Spacer(Modifier.height(10.dp))
-        Text("Heard: " + heard.joinToString("  ·  ") { "\"$it\"" }, color = palette.fg, fontSize = 12.sp)
-        Text("${settings.wakeVariants.size} extra way(s) of hearing your phrase learned.", color = palette.muted, fontSize = 12.sp)
-        Spacer(Modifier.height(8.dp))
-        Chip("START OVER", false, palette) { heard = emptyList(); settings.setWakeVariants(emptyList()); if (settings.wakeWord) { WakeService.stop(ctx); WakeService.start(ctx) } }
+        Chip("DELETE MY VOICE DATA", false, palette) {
+            WakeService.stop(ctx); settings.setWakeWord(false)
+            com.demon.nothingassistant.audio.WakeVoice.clear(ctx); tick++
+        }
     }
 
     Spacer(Modifier.height(22.dp))

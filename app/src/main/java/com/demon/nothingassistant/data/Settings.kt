@@ -285,6 +285,14 @@ class Settings(context: Context) {
         setAiVoiceEnabled(true)
     }
 
+    /** Once per install: Kilo (free AI) and Edge (free voice) are switched on so nothing has to be enabled by hand. Providers the user already set up stay first. */
+    fun applyDefaultsOnce() {
+        if (sp.getBoolean("defaults_v2", false)) return
+        sp.edit().putBoolean("defaults_v2", true).apply()
+        if (providers.none { it.ready && !it.id.equals("kilo") }) preferProvider("kilo") else setAiEnabled(true)
+        if (voiceProviders.none { it.ready && it.id != "v_edge" }) preferVoiceProvider("v_edge") else setAiVoiceEnabled(true)
+    }
+
     /** Puts an AI chat provider first in the list and turns AI chat on. */
     fun preferProvider(id: String) {
         val i = providers.indexOfFirst { it.id == id }

@@ -222,3 +222,13 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **Default assistant after restart**: re-applied at boot (BootReceiver, app start, accessibility connect) through WRITE_SECURE_SETTINGS (granted once by Shizuku/root) or Shizuku/root, only if you had chosen this app.
 - **Speak to interrupt**: while a reply is spoken the microphone (echo-cancelled) watches for your voice; speaking over it stops the voice and listens.
 - **Wake word**: optional foreground service, volume gate + phrase-only Vosk recogniser, training by recording the phrase three times, sensitivity.
+
+## Round 7
+
+- **AI agent** (`agent/AiAgent.kt`): for any job that needs the screen, the AI gets a numbered map of everything on screen plus a screenshot, picks one action at a time (tap by id/text/position, type, scroll, scroll-to-find, swipe, system buttons, open app, open settings page, search Settings, any intent, shell), checks whether the screen changed, and recovers (back, another route, Settings search). Never pays; asks before delete/reset. Used by `do_in_apps` and automatically when a normal tap/toggle/setting command fails.
+- **Wake word** is now trained from your own voice (MFCC + dynamic time warping): a 12-prompt Siri-style setup (soft, loud, fast, slow, far, cheerful, sleepy...), live ring visual, test screen. Needs no speech model or download; any phrase, any language.
+- **Voice speed**: long replies from Edge and other file-based voices start after the first sentence while the rest is produced in the background; follow-up listening starts sooner.
+- **Blob**: smoothed voice response and Siri-style aurora lights.
+- **Defaults**: Kilo (free AI) and Edge (free voice) are switched on once automatically.
+- **Window fix**: the panel no longer closes between tasks, and if the assistant ever listens with no window it brings the panel back or stops listening.
+- Vosk catalog also lists the more accurate big models.

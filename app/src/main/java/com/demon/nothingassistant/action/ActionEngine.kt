@@ -76,7 +76,7 @@ class ActionEngine(context: Context) {
     /** Set by the controller so open-ended jobs can ask the user's AI provider. */
     var visionProvider: () -> Boolean = { true }
     var brainProvider: () -> com.demon.nothingassistant.ai.Brain? = { null }
-    private val agent by lazy { com.demon.nothingassistant.agent.ScreenAgent(app, { c -> runSuspendInner(c) }, { brainProvider() }).also { it.vision = { visionProvider() } } }
+    private val agent by lazy { com.demon.nothingassistant.agent.ScreenAgent(app, { c -> runSuspendInner(c) }, { brainProvider() }).also { it.vision = { visionProvider() }; it.progress = { m -> onProgress?.invoke(m) } } }
     private val priv = com.demon.nothingassistant.priv.PrivActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { it.pkg to it.label } }, { i -> launch(i) })
     private val share = ShareActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { it.pkg to it.label } }, { i -> launch(i) }, ui, smart)
     /** Called by the controller so long jobs can say "It's updating." out loud. */

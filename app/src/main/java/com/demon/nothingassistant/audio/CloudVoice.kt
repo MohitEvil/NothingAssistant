@@ -51,24 +51,83 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
         pool.execute {
             var handled = false
             var file: File? = null
+            var queue: Triple<Provider, List<String>, File>? = null
             for (p in providers) {
                 if (my != token) return@execute
                 try {
-                    if (streams(p)) { play(p, text.take(3800), my) { main.post { if (my == token) onStart() } }; handled = true } else file = synth(p, text)
+                    if (streams(p)) { play(p, text.take(3800), my) { main.post { if (my == token) onStart() } }; handled = true }
+                    else {
+                        // Long answers: the first sentence is made and played at once while the rest is made in the background.
+                        val chunks = chunk(text)
+                        if (chunks.size > 1) { val first = synth(p, chunks[0]); if (first != null) queue = Triple(p, chunks, first) }
+                        else file = synth(p, text)
+                    }
                 } catch (e: Exception) {
                     AppLog.e("cloudvoice", "${p.name}: ${e.message}")
                 }
-                if (handled || file != null) break
+                if (handled || file != null || queue != null) break
             }
             main.post {
                 if (my != token) return@post
                 when {
                     handled -> onDone()
+                    queue != null -> playChunks(queue!!, my, onStart, onDone, onFail)
                     file != null -> playFile(file, my, onStart, onDone, onFail)
                     else -> onFail()
                 }
             }
         }
+    }
+
+    /** First sentence alone (so speech starts quickly), then the rest in groups. */
+    private fun chunk(text: String): List<String> {
+        val t = text.trim()
+        if (t.length <= 150) return listOf(t)
+        val sentences = t.split(Regex("(?<=[.!?\u0964\u0965])\\s+|\\n+")).filter { it.isNotBlank() }
+        if (sentences.size < 2) return listOf(t)
+        val out = ArrayList<String>()
+        var i = 0
+        var first = sentences[0]
+        i = 1
+        while (first.length < 28 && i < sentences.size) { first += " " + sentences[i]; i++ }
+        out.add(first)
+        var cur = StringBuilder()
+        while (i < sentences.size) {
+            if (cur.isNotEmpty() && cur.length + sentences[i].length > 320) { out.add(cur.toString().trim()); cur = StringBuilder() }
+            cur.append(sentences[i]).append(' ')
+            i++
+        }
+        if (cur.isNotBlank()) out.add(cur.toString().trim())
+        return out
+    }
+
+    /** Plays the chunks one after another; the next ones are produced while the current one is heard. */
+    private fun playChunks(q: Triple<Provider, List<String>, File>, my: Int, onStart: () -> Unit, onDone: () -> Unit, onFail: () -> Unit) {
+        val (p, chunks, firstFile) = q
+        val files = arrayOfNulls<File>(chunks.size)
+        val ready = Array(chunks.size) { java.util.concurrent.CountDownLatch(1) }
+        files[0] = firstFile; ready[0].countDown()
+        pool.execute {
+            for (i in 1 until chunks.size) {
+                if (my != token) break
+                files[i] = runCatching { synth(p, chunks[i]) }.getOrNull()
+                ready[i].countDown()
+            }
+        }
+        fun playNext(i: Int) {
+            if (my != token) return
+            if (i >= chunks.size) { onDone(); return }
+            pool.execute {
+                ready[i].await(25, java.util.concurrent.TimeUnit.SECONDS)
+                val f = files[i]
+                main.post {
+                    if (my != token) return@post
+                    if (f == null) { if (i == 0) onFail() else playNext(i + 1) }
+                    else playFile(f, my, { if (i == 0) onStart() }, { playNext(i + 1) }, { playNext(i + 1) })
+                }
+            }
+        }
+        playNext(0)
     }
 
     private fun streams(p: Provider) = p.baseUrl.contains("generativelanguage") || p.baseUrl.contains("elevenlabs") || p.baseUrl.contains("api.openai.com")

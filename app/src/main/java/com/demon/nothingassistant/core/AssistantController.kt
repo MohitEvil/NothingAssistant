@@ -326,6 +326,22 @@ class AssistantController(private val context: Context, val settings: Settings) 
         micActive = true
         com.demon.nothingassistant.audio.Cue.listening()
         speech.start(settings.language, settings.preferOffline, settings.asrEngine)
+        ensureWindow()
+    }
+
+    /** Listening with no window on screen is never wanted: bring the panel back, and if that is impossible stop listening. */
+    private fun ensureWindow() {
+        scope.launch {
+            repeat(2) {
+                delay(1500)
+                val st = _ui.value.state
+                if ((st == AssistantState.LISTENING || st == AssistantState.RECOGNIZING) && !liveOn.value &&
+                    com.demon.nothingassistant.PanelActivity.current == null && !com.demon.nothingassistant.MainActivity.resumed
+                ) {
+                    if (it == 0) com.demon.nothingassistant.PanelActivity.show(context) else cancel()
+                } else return@launch
+            }
+        }
     }
 
     private fun noMatch() {
@@ -582,6 +598,13 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 else successLaunching(result.message, text, launch)
             }
             is ActionResult.Failure -> {
+                // A tap or a setting that didn't work out: hand the job to the AI agent, which looks at the screen and finds another way.
+                if (brain.configured() && cmd !is Command.Task && !result.message.startsWith("Which app") &&
+                    (cmd is Command.Screen || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.OpenSetting || cmd is Command.OpenSettings)
+                ) {
+                    execute(Command.Task(text), text)
+                    return
+                }
                 history.addPair(text, result.message, "action")
                 replayPattern?.let { com.demon.nothingassistant.agent.Skills.failed(it) }
                 pendingLearn = null; replayPattern = null
@@ -739,7 +762,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         lastActive = SystemClock.uptimeMillis()
         if ((settings.followUp || settings.stayOpen || liveOn.value) && hasMicPermission()) {
             speakJob = scope.launch {
-                delay(250)
+                delay(120)
                 beginListening(Mode.FOLLOWUP)
             }
         } else {

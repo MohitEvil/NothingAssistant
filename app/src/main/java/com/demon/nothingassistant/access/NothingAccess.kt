@@ -363,6 +363,26 @@ class NothingAccess : AccessibilityService() {
         return v + h
     }
 
+    /** A drag from one point to another (scrolling, pulling a shade, moving a slider). */
+    fun swipeXY(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long = 320): Boolean {
+        val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
+        val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, ms)).build()
+        return dispatchGesture(g, null, null)
+    }
+
+    /** System buttons by name: back, home, recents, notifications, quick_settings, power_menu, lock, screenshot. */
+    fun globalByName(name: String): Boolean = when (name.lowercase().replace(' ', '_')) {
+        "back" -> performGlobalAction(GLOBAL_ACTION_BACK)
+        "home" -> performGlobalAction(GLOBAL_ACTION_HOME)
+        "recents" -> performGlobalAction(GLOBAL_ACTION_RECENTS)
+        "notifications" -> performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
+        "quick_settings" -> performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)
+        "power_menu" -> performGlobalAction(GLOBAL_ACTION_POWER_DIALOG)
+        "lock" -> if (android.os.Build.VERSION.SDK_INT >= 28) performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) else false
+        "screenshot" -> if (android.os.Build.VERSION.SDK_INT >= 28) performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT) else false
+        else -> false
+    }
+
     fun tapAt(x: Float, y: Float): Boolean {
         val path = Path().apply { moveTo(x, y) }
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 60)).build()

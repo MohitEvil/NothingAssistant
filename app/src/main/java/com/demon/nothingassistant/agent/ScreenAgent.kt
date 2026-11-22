@@ -23,6 +23,10 @@ class ScreenAgent(
     /** Whether a screenshot is sent to the AI at each step. */
     var vision: () -> Boolean = { true }
 
+    /** Status text while working ("Tapping Wi-Fi…"). */
+    var progress: (String) -> Unit = {}
+    private val ai by lazy { AiAgent(ctx, exec, brain).also { a -> a.progress = { m -> progress(m) }; a.vision = { vision() } } }
+
     private val payWords = Regex("\\b(pay|payment|place (?:your )?order|confirm (?:order|booking|ride|payment|purchase)|book (?:now|ride|cab|table)|request (?:ride|cab)|buy(?: now)?|checkout|check out|proceed to pay|order now|purchase|subscribe|send money|transfer)\\b", RegexOption.IGNORE_CASE)
 
     private val foodApps = listOf("swiggy", "zomato", "blinkit", "zepto", "instamart", "bigbasket", "dominos", "mcdonald's", "kfc")
@@ -37,6 +41,8 @@ class ScreenAgent(
     private fun cap(s: String) = s.replaceFirstChar { it.uppercase() }
 
     suspend fun run(goal: String): ActionResult {
+        // With an AI set up, it does the whole job itself: it can see the screen and pick the best route.
+        if (brain()?.configured() == true) return ai.run(goal)
         val g = goal.trim().trimEnd('.', '!')
         // Ordering food
         Regex("^(?:order|get|buy|i want|i'd like|i would like)\\s+(.+?)(?:\\s+(?:from|on|using|via|in|with)\\s+(.+?))?$", RegexOption.IGNORE_CASE).find(g)?.let { m ->

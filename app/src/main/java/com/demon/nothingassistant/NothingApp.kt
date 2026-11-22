@@ -22,6 +22,7 @@ class NothingApp : Application() {
         com.demon.nothingassistant.ai.PyKb.init(this)
         settings = Settings(this)
         com.demon.nothingassistant.priv.Priv.preference = { settings.privMode }
+        settings.applyDefaultsOnce()
         controller = AssistantController(this, settings)
         android.os.Handler(mainLooper).postDelayed({ com.demon.nothingassistant.audio.SpeechInfo.autoConfigure(this, settings) }, 1500)
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default).launch {

@@ -21,17 +21,12 @@ import com.demon.nothingassistant.MainActivity
 import com.demon.nothingassistant.NothingApp
 import com.demon.nothingassistant.PanelActivity
 import com.demon.nothingassistant.R
-import com.demon.nothingassistant.audio.VoskAsr
+import com.demon.nothingassistant.audio.WakeVoice
 import com.demon.nothingassistant.debug.AppLog
-import org.json.JSONArray
-import org.json.JSONObject
-import org.vosk.Recognizer
-import kotlin.math.sqrt
 
 /**
- * Optional wake word ("Hey Nothing"). A tiny volume gate watches the microphone; only when somebody speaks does a recogniser that knows
- * nothing but the wake phrase (and the ways it heard you say it while training) listen to that one short burst. Silence costs almost
- * no CPU, and nothing is recorded, stored or sent anywhere.
+ * Optional wake word. A tiny volume gate watches the microphone; only when somebody speaks is that one short burst compared with the
+ * fingerprints of your own voice from training. Silence costs almost no CPU, and nothing is recorded, stored or sent anywhere.
  */
 class WakeService : Service() {
 
@@ -87,83 +82,39 @@ class WakeService : Service() {
         super.onDestroy()
     }
 
-    private fun grammar(phrases: List<String>): String = JSONArray().also { a -> phrases.forEach { a.put(it) }; a.put("[unk]") }.toString()
-
     @SuppressLint("MissingPermission")
     private fun loop(my: Int) {
         val settings = (application as NothingApp).settings
-        val model = VoskAsr.get(this).modelFor(settings.language)
-        if (model == null) { AppLog.e("wake", "no offline speech model downloaded"); stopSelf(); return }
-        val phrases = (listOf(settings.wakePhrase) + settings.wakeVariants).map { it.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
-        val gram = grammar(phrases)
-        val sr = 16000
-        val frame = 1600 // 100 ms
-        val buf = ShortArray(frame)
-        val ring = ArrayDeque<ShortArray>()
+        val model = WakeVoice.load(this)
+        if (model == null) { AppLog.e("wake", "no trained wake word yet"); stopSelf(); return }
+        val seg = WakeVoice.Segmenter { (0.5f - settings.wakeSens) * 0.01f }
+        val buf = ShortArray(800) // 50 ms
         var ar: AudioRecord? = null
-        var rec: Recognizer? = null
-        var floor = 0.006f
-        var silent = 0
-        var frames = 0
 
         fun openMic() {
-            val min = AudioRecord.getMinBufferSize(sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val a = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sr, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, sr))
+            val min = AudioRecord.getMinBufferSize(WakeVoice.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val a = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, WakeVoice.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, WakeVoice.SR))
             if (a.state == AudioRecord.STATE_INITIALIZED) { a.startRecording(); ar = a } else a.release()
         }
         fun closeMic() { ar?.let { runCatching { it.stop() }; it.release() }; ar = null }
 
         try {
             while (my == gen) {
-                // The panel is open or the settings page is training: the microphone belongs to them.
-                if (paused || PanelActivity.current != null) { closeMic(); rec?.close(); rec = null; Thread.sleep(700); continue }
+                // The panel is open or the training screen is recording: the microphone belongs to them.
+                if (paused || PanelActivity.current != null) { closeMic(); Thread.sleep(700); continue }
                 if (ar == null) { openMic(); if (ar == null) { Thread.sleep(2000); continue } }
-                val n = ar!!.read(buf, 0, frame)
+                val n = ar!!.read(buf, 0, buf.size)
                 if (n <= 0) continue
-                var sum = 0.0
-                for (i in 0 until n) { val v = buf[i] / 32768.0; sum += v * v }
-                val rms = sqrt(sum / n).toFloat()
-                val gate = maxOf(floor * 3.2f, 0.012f + (1f - settings.wakeSens) * 0.02f)
-
-                if (rec == null) {
-                    if (rms < gate) { floor = floor * 0.95f + rms * 0.05f; ring.addLast(buf.copyOf(n)); if (ring.size > 3) ring.removeFirst(); continue }
-                    // Somebody is making noise: let the phrase recogniser hear this burst (plus the 0.3 s before it).
-                    rec = Recognizer(model, sr.toFloat(), gram).also { r -> runCatching { r.setWords(true) } }
-                    for (b in ring) rec!!.acceptWaveForm(b, b.size)
-                    ring.clear()
-                    silent = 0; frames = 0
-                }
-                rec!!.acceptWaveForm(buf, n)
-                frames++
-                if (rms < gate * 0.7f) silent++ else silent = 0
-                if (silent >= 5 || frames >= 30) { // a pause, or a burst longer than any wake phrase
-                    val json = rec!!.finalResult
-                    rec!!.close(); rec = null
-                    if (accepts(json, phrases, settings.wakeSens)) {
-                        AppLog.d("wake", "woke up")
-                        closeMic()
-                        onWake()
-                        Thread.sleep(2500)
-                    }
+                val utterance = seg.push(buf, n) ?: continue
+                val f = WakeVoice.features(utterance) ?: continue
+                if (model.accepts(f, settings.wakeSens)) {
+                    AppLog.d("wake", "woke up (score ${model.score(f)} / limit ${model.threshold})")
+                    closeMic()
+                    onWake()
+                    Thread.sleep(2500)
                 }
             }
-        } finally {
-            closeMic()
-            runCatching { rec?.close() }
-        }
-    }
-
-    private fun accepts(json: String, phrases: List<String>, sens: Float): Boolean {
-    return runCatching {
-        val o = JSONObject(json)
-        val text = o.optString("text", "").trim().lowercase()
-        if (text.isEmpty() || text !in phrases) return@runCatching false
-        val arr = o.optJSONArray("result") ?: return@runCatching true
-        var sum = 0.0
-        for (i in 0 until arr.length()) sum += arr.getJSONObject(i).optDouble("conf", 1.0)
-        val avg = if (arr.length() == 0) 1.0 else sum / arr.length()
-        avg >= 0.9 - sens * 0.5
-    }.getOrDefault(false)
+        } finally { closeMic() }
     }
 
     private fun onWake() {

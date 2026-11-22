@@ -55,6 +55,7 @@ class Planner(private val context: Context, private val brain: Brain) {
             "Rules: use several calls, in order, for multi-step requests; put a wait call wherever the user says wait; " +
             "to install or update an app use install_app (one call); to tap something visible use tap_on_screen with its exact on-screen label; " +
             "use the conversation so far to resolve words like it, that, him, there; " +
+            "for anything that needs working through screens or apps (changing a setting you have no tool for, finding an option, filling a form, doing something inside an app, anything multi-step on screen) use ONE do_in_apps call with the whole goal: the AI agent sees the screen and finds the best way itself; " +
             "to restart, reboot or shut down the phone use power_control; for any other phone or system job that no tool covers use run_shell with a fitting shell command (you have full system access; risky commands are confirmed with the user automatically), never answer that you can't; " +
             "if a screenshot is attached it shows the screen right now: use it to decide what to tap or type; " +
             "if the user is only chatting or asking a question to be answered, reply {\"calls\":[]}. Never invent tools.\n" +

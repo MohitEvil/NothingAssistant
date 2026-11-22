@@ -84,14 +84,15 @@ class VoskAsr(private val context: Context) {
                 val byLang = LinkedHashMap<String, VoskLang>()
                 for (i in 0 until arr.length()) {
                     val o = arr.getJSONObject(i)
-                    if (o.optString("obsolete") == "true" || o.optString("type") != "small") continue
+                    val type = o.optString("type")
+                    if (o.optString("obsolete") == "true" || (type != "small" && type != "big-lgraph")) continue
                     val lang = o.optString("lang"); val url = o.optString("url"); val name = o.optString("name")
                     if (lang.isBlank() || url.isBlank()) continue
                     if (VoskLang.BUILTIN.any { it.url == url }) continue
                     val tag = if (lang.contains('-')) lang.substringBefore('-') + "-" + lang.substringAfter('-').uppercase() else lang
                     val size = o.optString("size_text").ifBlank { "" }.let { if (it.isBlank()) "" else "about $it" }
-                    val title = o.optString("lang_text").ifBlank { lang }
-                    byLang[lang] = VoskLang(name.removePrefix("vosk-model-"), tag, title, size, url)
+                    val title = o.optString("lang_text").ifBlank { lang } + (if (type == "big-lgraph") " · more accurate" else "")
+                    byLang[lang + "|" + type] = VoskLang(name.removePrefix("vosk-model-"), tag, title, size, url)
                 }
                 val list = byLang.values.sortedBy { it.title }
                 main.post {
