@@ -23,15 +23,14 @@ jobs:
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
           SRC="$SDK_ROOT/platforms/android-37.0"
           DEST="$SDK_ROOT/platforms/android-37"
-          if [ -d "$SRC" ]; then
-            rm -rf "$DEST"
-            ln -s "$SRC" "$DEST"
-            echo "Linked $DEST -> $SRC"
-            ls -la "$DEST"
-          else
-            echo "Source platform $SRC not found; available platforms:"
-            ls -la "$SDK_ROOT/platforms" || true
+          if [ -d "$SRC" ] && [ ! -d "$DEST" ]; then
+            mv "$SRC" "$DEST"
           fi
+          if [ -d "$DEST" ] && [ -f "$DEST/package.xml" ]; then
+            sed -i 's|platforms;android-37\.0|platforms;android-37|g' "$DEST/package.xml"
+            sed -i 's|<api-level>37\.0</api-level>|<api-level>37</api-level>|' "$DEST/package.xml"
+          fi
+          ls -la "$SDK_ROOT/platforms" || true
 
       - name: Add offline neural voice library (sherpa-onnx)
         run: bash scripts/fetch-sherpa.sh
