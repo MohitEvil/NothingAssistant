@@ -25,13 +25,9 @@ jobs:
           DEST="$SDK_ROOT/platforms/android-37"
           if [ -d "$SRC" ]; then
             rm -rf "$DEST"
-            cp -a "$SRC" "$DEST"
-            if [ -f "$DEST/package.xml" ]; then
-              sed -i 's|<path>platforms;android-37.0</path>|<path>platforms;android-37</path>|' "$DEST/package.xml"
-              sed -i 's|<display-name>.*</display-name>|<display-name>Android SDK Platform 37</display-name>|' "$DEST/package.xml"
-              echo "Patched package.xml in $DEST:"
-              grep -E '<path>|<display-name>|<api-level>|<revision>' "$DEST/package.xml" | head -10
-            fi
+            ln -s "$SRC" "$DEST"
+            echo "Linked $DEST -> $SRC"
+            ls -la "$DEST"
           else
             echo "Source platform $SRC not found; available platforms:"
             ls -la "$SDK_ROOT/platforms" || true
