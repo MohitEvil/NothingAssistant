@@ -115,6 +115,23 @@ object SpeechInfo {
         main.postDelayed({ finish() }, 6000)
     }
 
+    /**
+     * Opens the place where Google's offline speech packs are downloaded (the Google app's voice settings), not the
+     * "default assistant" page. Tries the voice settings screen first, then the Google app's own settings, then its app info.
+     */
+    fun openOfflineDownloads(context: Context): Boolean {
+        val g = "com.google.android.googlequicksearchbox"
+        val tries = listOf(
+            Intent().setClassName(g, "com.google.android.apps.gsa.settingsui.VoiceSearchPreferences"),
+            Intent(Intent.ACTION_APPLICATION_PREFERENCES).setPackage(g),
+            Intent("android.settings.APPLICATION_DETAILS_SETTINGS", android.net.Uri.parse("package:$g"))
+        )
+        for (i in tries) {
+            if (runCatching { context.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess) return true
+        }
+        return false
+    }
+
     /** "ru-RU" -> "Russian (Russia)" in the phone's language. */
     fun niceName(tag: String): String {
         val loc = Locale.forLanguageTag(tag.replace('_', '-'))

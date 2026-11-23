@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
+import com.demon.nothingassistant.debug.AppLog
 
 /**
  * Thin wrapper over Android's SpeechRecognizer. It only listens between start() and the final
@@ -38,7 +39,9 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     var alternatives: List<String> = emptyList()
         private set
 
-    private var recognizer: SpeechRecognizer? = null
+    private val recs = HashMap<Int, SpeechRecognizer>()
+    private var current: SpeechRecognizer? = null
+    private var lastError = SpeechRecognizer.ERROR_CLIENT
     private var generation = 0
 
     /** A real recognition service. Ours is only a placeholder that lets the system list us as an assistant, so it is never used. */
@@ -77,7 +80,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             if (vosk.anyInstalled()) {
                 usingDevice = true
                 generation++
-                runCatching { recognizer?.cancel() }
+                runCatching { current?.cancel() }
                 vosk.start(tag, listener)
                 return
             }
@@ -85,14 +88,55 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
         }
         usingDevice = false
         if (!systemOk) { listener.onError(ERROR_UNAVAILABLE); return }
-        val gen = ++generation
         Cue.hushSystemBeep(context, 20_000) // muted for the whole listening turn, so neither the start nor the stop ding is heard
-        val r = recognizer ?: (realService()?.let { SpeechRecognizer.createSpeechRecognizer(context, it) } ?: SpeechRecognizer.createSpeechRecognizer(context)).also { recognizer = it }
+        val routes = routesFor(offlineNow)
+        AppLog.d("ASR", "turn tag=$tag online=$online offlineNow=$offlineNow routes=$routes")
+        listen(tag0, tag, extras, offlineNow, choice, routes, 0)
+    }
+
+    /** The ways to reach Google's recogniser, best first. 0 = the speech service found by name, 1 = the on-device recogniser (Android 13+), 2 = the phone's default. */
+    private fun routesFor(offlineNow: Boolean): List<Int> {
+        val onDevice = android.os.Build.VERSION.SDK_INT >= 33 && runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }.getOrDefault(false)
+        val named = realService() != null
+        return buildList {
+            if (offlineNow && onDevice) add(1)
+            if (named) add(0)
+            add(2)
+            if (!offlineNow && onDevice) add(1)
+        }.distinct()
+    }
+
+    @android.annotation.SuppressLint("NewApi")
+    private fun recognizerFor(route: Int): SpeechRecognizer? = recs[route] ?: runCatching {
+        when (route) {
+            0 -> realService()?.let { SpeechRecognizer.createSpeechRecognizer(context, it) }
+            1 -> SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            else -> SpeechRecognizer.createSpeechRecognizer(context)
+        }
+    }.getOrNull()?.also { recs[route] = it }
+
+    private fun listen(tag0: String, tag: String, extras: List<String>, offlineNow: Boolean, choice: String, routes: List<Int>, idx: Int) {
+        val route = routes.getOrNull(idx)
+        val r = route?.let { recognizerFor(it) }
+        if (route == null || r == null) {
+            if (route != null) { listen(tag0, tag, extras, offlineNow, choice, routes, idx + 1); return }
+            if (vosk.anyInstalled()) { usingDevice = true; generation++; vosk.start(tag, listener) } else listener.onError(lastError)
+            return
+        }
+        val gen = ++generation
+        current = r
         runCatching { r.cancel() }
+        fun next(code: Int) {
+            lastError = code
+            AppLog.d("ASR", "route $route failed with error $code (tag=$tag); trying the next way")
+            runCatching { r.cancel() }
+            if (code == SpeechRecognizer.ERROR_CLIENT || code == 10 || code == 11) { runCatching { r.destroy() }; recs.remove(route) }
+            listen(tag0, tag, extras, offlineNow, choice, routes, idx + 1)
+        }
         r.setRecognitionListener(object : RecognitionListener {
             private fun live() = gen == generation
 
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) { if (live()) AppLog.d("ASR", "route $route listening") }
             override fun onBeginningOfSpeech() {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() { Cue.hushThenRelease(context, 1500) }
@@ -113,6 +157,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
                 Cue.hushThenRelease(context, 1500)
                 val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                 alternatives = all.drop(1)
+                AppLog.d("ASR", "route $route heard: ${all.firstOrNull().orEmpty()}")
                 listener.onFinal(all.firstOrNull().orEmpty())
             }
 
@@ -124,6 +169,15 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
                     val canOffline = SpeechInfo.hasOffline(tag) || vosk.anyInstalled()
                     if (canOffline) { runCatching { r.cancel() }; begin(tag0, true, choice); return }
                 }
+                // Nothing heard / busy / no permission are real answers; anything else means this route is broken, so try the next one.
+                val answer = error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT || error == SpeechRecognizer.ERROR_NO_MATCH ||
+                    error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS
+                if (!answer && idx + 1 < routes.size) { next(error); return }
+                if (!answer && vosk.anyInstalled() && (error == 12 || error == 13 || offlineNow)) {
+                    AppLog.d("ASR", "Google could not do $tag (error $error); using Vosk")
+                    usingDevice = true; generation++; vosk.start(tag, listener); return
+                }
+                AppLog.d("ASR", "route $route final error $error")
                 listener.onError(error)
             }
         })
@@ -132,22 +186,22 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, offlineNow)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1300L)
+            if (route != 1) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, offlineNow)
             // Two languages at once (for example English and Hindi) works with the online recogniser.
             val more = (extras + tag0).filter { !it.equals(tag, true) }.distinct()
-            if (!offlineNow && more.isNotEmpty()) putExtra("android.speech.extra.ADDITIONAL_LANGUAGES", ArrayList(more))
+            if (!offlineNow && route != 1 && more.isNotEmpty()) putExtra("android.speech.extra.ADDITIONAL_LANGUAGES", ArrayList(more))
         }
-        r.startListening(intent)
+        if (runCatching { r.startListening(intent) }.isFailure) next(SpeechRecognizer.ERROR_CLIENT)
     }
 
     /** Stop capturing and deliver whatever was heard so far. */
     fun stopListening() {
         if (usingDevice) { vosk.finish(); return }
         Cue.hushThenRelease(context, 1500)
-        recognizer?.stopListening()
+        current?.stopListening()
     }
 
     /** Stop listening and ignore anything still on its way. The recognizer is kept for the next turn. */
@@ -155,7 +209,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
         generation++
         if (usingDevice) { vosk.cancel(); return }
         Cue.hushThenRelease(context, 1500)
-        recognizer?.let { runCatching { it.cancel() } }
+        current?.let { runCatching { it.cancel() } }
     }
 
     /** Tear the recognizer down completely (screen closed, or the service dropped). */
@@ -163,10 +217,8 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
         generation++
         if (usingDevice) vosk.cancel()
         Cue.hushThenRelease(context, 1500)
-        recognizer?.let {
-            runCatching { it.cancel() }
-            runCatching { it.destroy() }
-        }
-        recognizer = null
+        recs.values.forEach { runCatching { it.cancel() }; runCatching { it.destroy() } }
+        recs.clear()
+        current = null
     }
 }

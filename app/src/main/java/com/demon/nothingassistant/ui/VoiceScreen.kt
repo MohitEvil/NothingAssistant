@@ -202,10 +202,14 @@ private fun RecogPage(settings: Settings, palette: GlyphPalette, openVosk: () ->
         google.forEach { tag -> Chip(SpeechInfo.niceName(tag).uppercase(), tag.equals(settings.language, true), palette) { settings.setLanguage(tag) } }
         Chip("REFRESH", false, palette) { tick++ }
         Chip("ADD / MANAGE", false, palette) {
-            val i = Intent("android.settings.VOICE_INPUT_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (runCatching { ctx.startActivity(i) }.isFailure) runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            if (!SpeechInfo.openOfflineDownloads(ctx)) {
+                val i = Intent("android.settings.VOICE_INPUT_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (runCatching { ctx.startActivity(i) }.isFailure) runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
         }
     }
+    Spacer(Modifier.height(6.dp))
+    Text("To add a language: in the Google app open Settings › Voice › Offline speech recognition, download it, then come back and tap REFRESH.", color = palette.muted, fontSize = 11.sp)
     if (!SpeechInfo.available(ctx)) {
         Spacer(Modifier.height(10.dp))
         Text("No Google speech recogniser found on this phone, so the offline one is used.", color = palette.red, fontSize = 12.sp)

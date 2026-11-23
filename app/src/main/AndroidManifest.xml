@@ -37,6 +37,7 @@
         <package android:name="moe.shizuku.privileged.api" />
         <package android:name="com.google.android.apps.maps" />
         <package android:name="com.waze" />
+        <package android:name="com.google.android.googlequicksearchbox" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="geo" />

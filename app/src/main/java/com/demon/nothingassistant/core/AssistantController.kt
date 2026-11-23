@@ -204,7 +204,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         9 -> "Microphone permission needed."
         1, 2, 4 -> "Speech recognition needs internet right now. Try again online."
         5, 10, 11 -> "The speech service dropped. Tap the glyph to try again."
-        12, 13 -> "That language isn't available offline. Pick another in Settings."
+        12, 13 -> "Google could not use that language here. Pick another in Voice settings, or download it for offline use."
         SpeechEngine.ERROR_UNAVAILABLE -> "No speech recognition service found on this phone. Download an on-device speech model in Voice settings."
         SpeechEngine.ERROR_NOMODEL -> "I can't find a speech recogniser on this phone. Open Voice settings: I'll walk you through installing Google's, or you can download my offline one."
         SpeechEngine.ERROR_ENGINE -> "The on-device speech engine couldn't start. Try another engine in Voice settings."

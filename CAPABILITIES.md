@@ -246,3 +246,8 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **Bilingual**: second-language chooser (Auto / None / any); a retry after "didn't catch that" listens in the other language.
 - **Detection**: installed Google offline languages are read from three routes (speech service, on-device recogniser, default) and merged, cached and shown.
 - **UI**: Voice → Speech recognition now has separate Google and Vosk sections.
+
+## Round 10
+- Google recognition now tries every route to the recogniser (Google speech service by name, on-device recogniser, phone default) and moves to the next if one fails; offline turns that Google can't do fall to Vosk. Each step is written to the log under ASR.
+- ADD / MANAGE opens Google's voice settings (offline speech packs), not the default assistant page.
+- Workflow `.github/workflows/build.yml` now includes the SDK 37 platform path fix.
