@@ -303,6 +303,17 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     // ---- Listening ----
 
+    /** The other language(s) to understand besides the main one. */
+    private fun secondLangs(): List<String> {
+        if (!settings.bilingual || settings.secondLang == "none") return emptyList()
+        if (settings.secondLang != "auto") return listOf(settings.secondLang)
+        val primary = settings.language.substringBefore('-').lowercase()
+        val pool = settings.googleOffline + com.demon.nothingassistant.audio.VoskAsr.get(context).installedModels().map { it.tag }
+        return pool.filter { it.substringBefore('-').lowercase() != primary }.distinctBy { it.substringBefore('-').lowercase() }.take(2)
+    }
+
+    init { speech.extraLanguages = { secondLangs() } }
+
     private fun beginListening(m: Mode) {
         resetJob?.cancel()
         workJob?.cancel()
@@ -316,6 +327,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         mode = m
         retried = false
         engineRetries = 0
+        speech.swapLanguage = false
         amplitude.floatValue = 0f
         when (m) {
             Mode.CONFIRM -> _ui.update { it.copy(micOpen = true, transcript = "") } // keep the question on screen
@@ -347,6 +359,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun noMatch() {
         if (!retried) {
             retried = true
+            // Bilingual: the second try listens in the other language.
+            if (secondLangs().isNotEmpty()) speech.swapLanguage = true
             transition(AssistantState.LISTENING, "Didn't catch that. Listening again…", "", micOpen = true)
             micActive = true
             scope.launch {

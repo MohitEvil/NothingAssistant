@@ -3,6 +3,7 @@ package com.demon.nothingassistant.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.BorderStroke
@@ -144,50 +145,66 @@ private fun RecogPage(settings: Settings, palette: GlyphPalette, openVosk: () ->
     val ctx = LocalContext.current
     val vosk = VoskAsr.get(ctx)
     var tick by remember { mutableStateOf(0) }
-    var google by remember { mutableStateOf(emptyList<String>()) }
-    LaunchedEffect(tick) {
-        SpeechInfo.autoConfigure(ctx, settings)
-        SpeechInfo.installedOffline(ctx) { google = it }
-    }
+    LaunchedEffect(tick) { SpeechInfo.autoConfigure(ctx, settings) }
+    val online = remember(tick) { SpeechInfo.online(ctx) }
+    val google = settings.googleOffline
     val installedCount = vosk.states.values.count { it.phase == InstallPhase.INSTALLED }
-    val voskTags = remember(installedCount) { vosk.installedModels().map { it.tag } }
-    val langs = (google + voskTags).distinctBy { it.lowercase() }
+    val voskLangs = remember(installedCount) { vosk.installedModels() }
     val label = remember(tick) { SpeechInfo.label(ctx) }
-    val current = langs.firstOrNull { it.equals(settings.language, true) } ?: langs.firstOrNull { it.substringBefore('-').equals(settings.language.substringBefore('-'), true) }
 
     SectionLabel("RECOGNISER", palette)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        listOf("AUTO" to "auto", "GOOGLE / SYSTEM" to "system", "ON-DEVICE (OFFLINE)" to "device").forEach { (name, id) ->
+        listOf("AUTO" to "auto", "GOOGLE / SYSTEM" to "system", "VOSK (OFFLINE)" to "device").forEach { (name, id) ->
             Chip(name, (if (settings.asrEngine in listOf("live", "accurate", "twopass")) "device" else settings.asrEngine) == id, palette) { settings.setAsrEngine(id) }
         }
     }
     Spacer(Modifier.height(8.dp))
     Text(
         when (settings.asrEngine) {
-            "system" -> "Uses the speech service of your ROM" + (label?.let { " ($it)" } ?: "") + ". Needs internet unless the language is downloaded offline."
-            "device" -> "My own offline recogniser (Vosk). Works with no internet and no Google. Download the languages you speak."
-            else -> "Uses Google speech when your ROM has it, otherwise my offline recogniser. Recommended."
+            "system" -> "Always the speech service of your ROM" + (label?.let { " ($it)" } ?: "") + ". Online it is the most accurate and understands two languages."
+            "device" -> "Always my own offline recogniser (Vosk). Works with no internet and no Google. Download the languages you speak."
+            else -> "With internet: Google's online recogniser (most accurate, understands two languages). Without: Google's downloaded languages, then Vosk. Right now: " + (if (online) "online." else "offline.")
         },
         color = palette.muted, fontSize = 12.sp
     )
     Spacer(Modifier.height(12.dp))
     Card(palette) {
-        ToggleRow("Prefer offline speech", "Uses the on-device model when installed", settings.preferOffline, palette) { settings.setPreferOffline(it) }
+        ToggleRow("Offline only", "Use downloaded languages even when you have internet", settings.preferOffline, palette) { settings.setPreferOffline(it) }
         Divider(palette)
-        ToggleRow("Understand two languages", "Offline recogniser listens for two languages at once (for example English and Hindi) and keeps the better result", settings.bilingual, palette) { settings.setBilingual(it) }
+        ToggleRow("Understand two languages", "Online: Google listens for both. Offline: Vosk listens for two at once. A retry switches to the other language.", settings.bilingual, palette) { settings.setBilingual(it) }
+    }
+
+    if (settings.bilingual) {
+        Spacer(Modifier.height(22.dp))
+        SectionLabel("SECOND LANGUAGE", palette)
+        val primary = settings.language.substringBefore('-').lowercase()
+        val popular = setOf("hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa", "ur", "ar", "es", "fr", "de", "ru", "pt", "ja", "ko", "zh", "id", "tr", "it")
+        val cands = (google + voskLangs.map { it.tag } + settings.supportedLangs.filter { it.substringBefore('-').lowercase() in popular })
+            .filter { it.substringBefore('-').lowercase() != primary }.distinctBy { it.substringBefore('-').lowercase() }.take(14)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Chip("AUTO", settings.secondLang == "auto", palette) { settings.setSecondLang("auto") }
+            Chip("NONE", settings.secondLang == "none", palette) { settings.setSecondLang("none") }
+            cands.forEach { tag -> Chip(SpeechInfo.niceName(tag).uppercase(), settings.secondLang.equals(tag, true), palette) { settings.setSecondLang(tag) } }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("Auto picks another language you have downloaded.", color = palette.muted, fontSize = 11.sp)
     }
 
     Spacer(Modifier.height(24.dp))
-    SectionLabel("LANGUAGES ON THIS PHONE", palette)
-    if (langs.isEmpty()) {
-        Text("No downloaded language found yet. Download one below, or add offline speech in your phone's Voice input settings.", color = palette.muted, fontSize = 12.sp)
-    } else {
-        Text("Only languages that are downloaded here are listed. Tap one to speak it.", color = palette.muted, fontSize = 12.sp)
-    }
+    SectionLabel("GOOGLE · DOWNLOADED ON THIS PHONE", palette)
+    Text(
+        if (google.isEmpty()) "None found yet. Online recognition works for every language; downloads are only for use without internet."
+        else "Languages in your phone's Google speech (offline). Tap one to speak it.",
+        color = palette.muted, fontSize = 12.sp
+    )
     Spacer(Modifier.height(10.dp))
     FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        langs.forEach { tag -> Chip(SpeechInfo.niceName(tag).uppercase(), tag == current, palette) { settings.setLanguage(tag) } }
+        google.forEach { tag -> Chip(SpeechInfo.niceName(tag).uppercase(), tag.equals(settings.language, true), palette) { settings.setLanguage(tag) } }
         Chip("REFRESH", false, palette) { tick++ }
+        Chip("ADD / MANAGE", false, palette) {
+            val i = Intent("android.settings.VOICE_INPUT_SETTINGS").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (runCatching { ctx.startActivity(i) }.isFailure) runCatching { ctx.startActivity(Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
     }
     if (!SpeechInfo.available(ctx)) {
         Spacer(Modifier.height(10.dp))
@@ -195,7 +212,16 @@ private fun RecogPage(settings: Settings, palette: GlyphPalette, openVosk: () ->
     }
 
     Spacer(Modifier.height(24.dp))
-    Card(palette) { NavRow(DotIcons.VOICE, "Offline languages", if (installedCount > 0) "$installedCount downloaded · add or remove" else "Download languages (Russian, Arabic, Hindi…)", palette, openVosk) }
+    SectionLabel("VOSK · OFFLINE ENGINE", palette)
+    Text(if (voskLangs.isEmpty()) "No Vosk language downloaded." else "Languages downloaded for my own offline recogniser. Tap one to speak it.", color = palette.muted, fontSize = 12.sp)
+    if (voskLangs.isNotEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            voskLangs.forEach { m -> Chip(m.title.uppercase(), m.tag.equals(settings.language, true), palette) { settings.setLanguage(m.tag) } }
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    Card(palette) { NavRow(DotIcons.VOICE, "Vosk languages", if (installedCount > 0) "$installedCount downloaded · add or remove" else "Download languages (Russian, Arabic, Hindi…)", palette, openVosk) }
 }
 
 /** Every language the offline recogniser can learn, each downloaded once. */

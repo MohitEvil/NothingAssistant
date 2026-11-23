@@ -23,6 +23,7 @@ class NothingApp : Application() {
         settings = Settings(this)
         com.demon.nothingassistant.priv.Priv.preference = { settings.privMode }
         settings.applyDefaultsOnce()
+        com.demon.nothingassistant.audio.SpeechInfo.cache = settings.googleOffline
         controller = AssistantController(this, settings)
         android.os.Handler(mainLooper).postDelayed({ com.demon.nothingassistant.audio.SpeechInfo.autoConfigure(this, settings) }, 1500)
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default).launch {

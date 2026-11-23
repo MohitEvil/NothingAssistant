@@ -240,3 +240,9 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **Window**: `service/WindowAnchor.kt` keeps a 1-pixel invisible window while the assistant works so the panel can always reopen; follow-up listening never starts without a visible panel.
 - **AI agent**: retries, longer timeout and real error messages; screenshot only when needed to save rate limit.
 - **Routing**: with an AI on, anything longer than a short clear command is planned by the AI first; Needle 3 and the fixed grammar remain the offline fallback.
+
+## Round 9
+- **Online-first speech**: with internet, Auto uses Google's online recogniser (best accuracy, takes a second language via EXTRA_ADDITIONAL_LANGUAGES). Offline: Google's downloaded language if present, else Vosk. A network failure mid-turn falls back to offline for the same turn. "Offline only" toggle forces on-device.
+- **Bilingual**: second-language chooser (Auto / None / any); a retry after "didn't catch that" listens in the other language.
+- **Detection**: installed Google offline languages are read from three routes (speech service, on-device recogniser, default) and merged, cached and shown.
+- **UI**: Voice → Speech recognition now has separate Google and Vosk sections.

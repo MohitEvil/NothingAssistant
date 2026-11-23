@@ -138,6 +138,12 @@ class Settings(context: Context) {
     /** Send a screenshot to the AI when a request is about what is on screen. */
     var aiVision by mutableStateOf(sp.getBoolean("ai_vision", true))
         private set
+    /** Languages whose offline pack is downloaded in the phone's Google speech service (last detection). */
+    var googleOffline by mutableStateOf((sp.getStringSet("google_offline", emptySet()) ?: emptySet()).toList().sorted())
+        private set
+    /** Second language for bilingual listening: "auto", "none" or a tag such as hi-IN. */
+    var secondLang by mutableStateOf(sp.getString("second_lang", "auto") ?: "auto")
+        private set
     var bilingual by mutableStateOf(sp.getBoolean("bilingual", true))
         private set
     /** Speaking while the assistant talks stops it so you can give a new command. */
@@ -290,6 +296,11 @@ class Settings(context: Context) {
 
     /** Once per install: Kilo (free AI) and Edge (free voice) are switched on so nothing has to be enabled by hand. Providers the user already set up stay first. */
     fun applyDefaultsOnce() {
+        if (!sp.getBoolean("defaults_v3", false)) {
+            // Online recognition when there is internet (better, and it understands two languages); offline only as the fallback.
+            sp.edit().putBoolean("defaults_v3", true).apply()
+            setPreferOffline(false)
+        }
         if (sp.getBoolean("defaults_v2", false)) return
         sp.edit().putBoolean("defaults_v2", true).apply()
         if (providers.none { it.ready && !it.id.equals("kilo") }) preferProvider("kilo") else setAiEnabled(true)
@@ -377,6 +388,10 @@ class Settings(context: Context) {
     fun setWakePhrase(v: String) { wakePhrase = v.trim().lowercase(); wakeVariants = emptyList(); sp.edit().putString("wake_phrase", wakePhrase).putStringSet("wake_variants", emptySet()).apply() }
     @JvmName("applyWakeVariants")
     fun setWakeVariants(v: List<String>) { wakeVariants = v.distinct().sorted(); sp.edit().putStringSet("wake_variants", wakeVariants.toSet()).apply() }
+    @JvmName("applyGoogleOffline")
+    fun setGoogleOffline(v: List<String>) { googleOffline = v.distinct().sorted(); sp.edit().putStringSet("google_offline", googleOffline.toSet()).apply() }
+    @JvmName("applySecondLang")
+    fun setSecondLang(v: String) { secondLang = v; sp.edit().putString("second_lang", v).apply() }
     @JvmName("applyVoiceLock")
     fun setVoiceLock(v: Boolean) { voiceLock = v; sp.edit().putBoolean("voice_lock", v).apply() }
     @JvmName("applyWakeSens")

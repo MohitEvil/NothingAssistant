@@ -52,16 +52,33 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     private val vosk get() = VoskAsr.get(context)
     private var usingDevice = false
 
-    /** Which recogniser a turn uses: "auto" (Google/system if the ROM has one, else on-device), "system" or "device". */
-    fun start(languageTag: String, preferOffline: Boolean, choice: String = "auto") {
+    /** Other languages to listen for besides the main one (set by the controller; empty = single language). */
+    var extraLanguages: () -> List<String> = { emptyList() }
+
+    /** When true the first extra language is used as the main one (the retry after a turn nothing was understood in). */
+    @Volatile var swapLanguage = false
+
+    /**
+     * Which recogniser a turn uses. "auto": with internet, Google's online recogniser (the most accurate, and it can take a second
+     * language); without internet, Google's offline pack if that language is downloaded, otherwise the on-device Vosk model.
+     * "system" and "device" force one. If the online attempt fails for lack of network, the same turn falls back to offline.
+     */
+    fun start(languageTag: String, preferOffline: Boolean, choice: String = "auto") = begin(languageTag, preferOffline, choice)
+
+    private fun begin(tag0: String, preferOffline: Boolean, choice: String) {
+        val extras = extraLanguages()
+        val tag = if (swapLanguage && extras.isNotEmpty()) extras.first() else tag0
         val systemOk = SpeechRecognizer.isRecognitionAvailable(context) || realService() != null
-        val wantDevice = choice == "device" || choice == "live" || choice == "accurate" || choice == "twopass" || (choice == "auto" && !systemOk)
-        if (wantDevice) {
+        val online = SpeechInfo.online(context)
+        val offlineNow = preferOffline || !online
+        val deviceChoice = choice == "device" || choice == "live" || choice == "accurate" || choice == "twopass"
+        val autoDevice = choice == "auto" && (!systemOk || (offlineNow && !SpeechInfo.hasOffline(tag) && vosk.anyInstalled()))
+        if (deviceChoice || autoDevice) {
             if (vosk.anyInstalled()) {
                 usingDevice = true
                 generation++
                 runCatching { recognizer?.cancel() }
-                vosk.start(languageTag, listener)
+                vosk.start(tag, listener)
                 return
             }
             if (!systemOk || choice != "auto") { usingDevice = false; listener.onError(ERROR_NOMODEL); return }
@@ -100,18 +117,28 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             }
 
             override fun onError(error: Int) {
-                if (live()) { Cue.hushThenRelease(context, 1500); listener.onError(error) }
+                if (!live()) return
+                Cue.hushThenRelease(context, 1500)
+                // The online attempt couldn't reach the server (timeout, network, server): do the same turn offline instead of failing.
+                if (!offlineNow && error in intArrayOf(SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_SERVER)) {
+                    val canOffline = SpeechInfo.hasOffline(tag) || vosk.anyInstalled()
+                    if (canOffline) { runCatching { r.cancel() }; begin(tag0, true, choice); return }
+                }
+                listener.onError(error)
             }
         })
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, offlineNow)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1300L)
+            // Two languages at once (for example English and Hindi) works with the online recogniser.
+            val more = (extras + tag0).filter { !it.equals(tag, true) }.distinct()
+            if (!offlineNow && more.isNotEmpty()) putExtra(RecognizerIntent.EXTRA_ADDITIONAL_LANGUAGES, ArrayList(more))
         }
         r.startListening(intent)
     }

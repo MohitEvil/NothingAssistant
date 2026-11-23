@@ -57,25 +57,62 @@ object SpeechInfo {
             if (langs.isNotEmpty()) settings.setSupportedLangs(langs)
             if (!settings.langChosen) pickDefault(langs, pref)?.let { settings.setLanguageAuto(it) }
         }
+        installedOffline(context) { list ->
+            if (list.isNotEmpty()) { settings.setGoogleOffline(list); cache = list }
+        }
     }
 
-    /** Languages whose offline speech pack is actually downloaded on this phone (Android 13+). Empty when unknown. */
+    /** Last known list of offline-installed Google languages, for the engine to decide quickly. */
+    @Volatile var cache: List<String> = emptyList()
+
+    fun hasOffline(tag: String): Boolean {
+        val base = tag.substringBefore('-').lowercase()
+        return cache.any { it.equals(tag, true) } || cache.any { it.substringBefore('-').lowercase() == base }
+    }
+
+    /** True when the phone has a working internet connection. */
+    fun online(c: Context): Boolean = runCatching {
+        val cm = c.getSystemService(android.net.ConnectivityManager::class.java)
+        val n = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(n) ?: return false
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(false)
+
+    /**
+     * Languages whose offline speech pack is downloaded in the phone's Google speech service (Android 13+). Three routes are asked and
+     * their answers merged, because a ROM may answer on only one of them: the speech service itself, the on-device recogniser, and the default one.
+     */
     @android.annotation.SuppressLint("NewApi")
     fun installedOffline(context: Context, done: (List<String>) -> Unit) {
         if (android.os.Build.VERSION.SDK_INT < 33) { done(emptyList()); return }
-        runCatching {
-            if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) { done(emptyList()); return }
-            val r = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val found = LinkedHashSet<String>()
+        var pending = 0
+        var finished = false
+        fun finish() { if (!finished) { finished = true; done(found.toList().sorted()) } }
+        fun one() { pending--; if (pending <= 0) finish() }
+        fun check(make: () -> SpeechRecognizer?) {
+            pending++
+            val r = runCatching { make() }.getOrNull()
+            if (r == null) { main.post { one() }; return }
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            val main = android.os.Handler(android.os.Looper.getMainLooper())
-            r.checkRecognitionSupport(intent, { it.run() }, object : android.speech.RecognitionSupportCallback {
-                override fun onSupportResult(support: android.speech.RecognitionSupport) {
-                    val l = support.installedOnDeviceLanguages.map(::norm).filter { it.isNotBlank() }.distinct()
-                    main.post { runCatching { r.destroy() }; done(l) }
-                }
-                override fun onError(error: Int) { main.post { runCatching { r.destroy() }; done(emptyList()) } }
-            })
-        }.onFailure { done(emptyList()) }
+            val ok = runCatching {
+                r.checkRecognitionSupport(intent, { it.run() }, object : android.speech.RecognitionSupportCallback {
+                    override fun onSupportResult(support: android.speech.RecognitionSupport) {
+                        main.post {
+                            found += support.installedOnDeviceLanguages.map(::norm).filter { it.isNotBlank() }
+                            runCatching { r.destroy() }; one()
+                        }
+                    }
+                    override fun onError(error: Int) { main.post { runCatching { r.destroy() }; one() } }
+                })
+            }.isSuccess
+            if (!ok) { runCatching { r.destroy() }; main.post { one() } }
+        }
+        check { service(context)?.let { SpeechRecognizer.createSpeechRecognizer(context, android.content.ComponentName(it.packageName, it.name)) } }
+        check { if (SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) SpeechRecognizer.createOnDeviceSpeechRecognizer(context) else null }
+        check { SpeechRecognizer.createSpeechRecognizer(context) }
+        main.postDelayed({ finish() }, 6000)
     }
 
     /** "ru-RU" -> "Russian (Russia)" in the phone's language. */
