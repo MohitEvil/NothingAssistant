@@ -21,10 +21,20 @@ jobs:
       - name: Fix Android SDK 37 platform path
         run: |
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SRC="$SDK_ROOT/platforms/android-37.0"
           DEST="$SDK_ROOT/platforms/android-37"
-          if [ -d "$SDK_ROOT/platforms/android-37.0" ] && [ ! -d "$DEST" ]; then
-            rm -f "$DEST"
-            ln -s "$SDK_ROOT/platforms/android-37.0" "$DEST"
+          if [ -d "$SRC" ]; then
+            rm -rf "$DEST"
+            cp -a "$SRC" "$DEST"
+            if [ -f "$DEST/package.xml" ]; then
+              sed -i 's|<path>platforms;android-37.0</path>|<path>platforms;android-37</path>|' "$DEST/package.xml"
+              sed -i 's|<display-name>.*</display-name>|<display-name>Android SDK Platform 37</display-name>|' "$DEST/package.xml"
+              echo "Patched package.xml in $DEST:"
+              grep -E '<path>|<display-name>|<api-level>|<revision>' "$DEST/package.xml" | head -10
+            fi
+          else
+            echo "Source platform $SRC not found; available platforms:"
+            ls -la "$SDK_ROOT/platforms" || true
           fi
 
       - name: Add offline neural voice library (sherpa-onnx)
