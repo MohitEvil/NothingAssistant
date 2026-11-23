@@ -138,7 +138,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1300L)
             // Two languages at once (for example English and Hindi) works with the online recogniser.
             val more = (extras + tag0).filter { !it.equals(tag, true) }.distinct()
-            if (!offlineNow && more.isNotEmpty()) putExtra(RecognizerIntent.EXTRA_ADDITIONAL_LANGUAGES, ArrayList(more))
+            if (!offlineNow && more.isNotEmpty()) putExtra("android.speech.extra.ADDITIONAL_LANGUAGES", ArrayList(more))
         }
         r.startListening(intent)
     }

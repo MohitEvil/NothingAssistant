@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "com.demon.nothingassistant"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.demon.nothingassistant"
         minSdk = 29
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
         // The CMF Phone 1 is 64-bit ARM. Keeping only that ABI keeps the APK small when the neural voice libraries are bundled.
