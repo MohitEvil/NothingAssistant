@@ -251,3 +251,6 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Google recognition now tries every route to the recogniser (Google speech service by name, on-device recogniser, phone default) and moves to the next if one fails; offline turns that Google can't do fall to Vosk. Each step is written to the log under ASR.
 - ADD / MANAGE opens Google's voice settings (offline speech packs), not the default assistant page.
 - Workflow `.github/workflows/build.yml` now includes the SDK 37 platform path fix.
+
+## Round 11
+- Google online recognition answered in English only: Google's recogniser ignores the chosen language unless `android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES` is sent (even empty). It is now always sent (correct key), plus the short spelling, plus Android 14+ language detection limited to the chosen languages when two are on.

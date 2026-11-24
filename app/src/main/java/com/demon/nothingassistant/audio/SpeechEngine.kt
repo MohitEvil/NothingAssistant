@@ -192,7 +192,18 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             if (route != 1) putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, offlineNow)
             // Two languages at once (for example English and Hindi) works with the online recogniser.
             val more = (extras + tag0).filter { !it.equals(tag, true) }.distinct()
-            if (!offlineNow && route != 1 && more.isNotEmpty()) putExtra("android.speech.extra.ADDITIONAL_LANGUAGES", ArrayList(more))
+            // Google's recogniser ignores EXTRA_LANGUAGE (and answers in the phone's language) unless this extra is present, even empty.
+            // The real key has "EXTRA_" twice; the shorter spelling is sent too in case a version reads that one.
+            val extra = if (offlineNow) emptyList() else more
+            putExtra("android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES", extra.toTypedArray())
+            putExtra("android.speech.extra.ADDITIONAL_LANGUAGES", ArrayList(extra))
+            // Android 14+: let the recogniser switch between the languages mid-sentence (ignored if the recogniser doesn't support it).
+            if (!offlineNow && route != 1 && more.isNotEmpty() && android.os.Build.VERSION.SDK_INT >= 34) {
+                val all = ArrayList(listOf(tag) + more)
+                putExtra("android.speech.extra.ENABLE_LANGUAGE_DETECTION", true)
+                putExtra("android.speech.extra.LANGUAGE_DETECTION_ALLOWED_LANGUAGES", all)
+            }
+            AppLog.d("ASR", "intent lang=$tag extra=$extra offline=$offlineNow route=$route")
         }
         if (runCatching { r.startListening(intent) }.isFailure) next(SpeechRecognizer.ERROR_CLIENT)
     }
