@@ -98,13 +98,19 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     private fun routesFor(offlineNow: Boolean): List<Int> {
         val onDevice = android.os.Build.VERSION.SDK_INT >= 33 && runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }.getOrDefault(false)
         val named = realService() != null
-        return buildList {
+        // The phone's default recogniser (2) is the one that proved reliable for every language; the named service (0) often drops or refuses a language.
+        val base = buildList {
             if (offlineNow && onDevice) add(1)
-            if (named) add(0)
             add(2)
+            if (named) add(0)
             if (!offlineNow && onDevice) add(1)
         }.distinct()
+        val good = lastGood
+        return if (good != null && good in base) listOf(good) + base.filter { it != good } else base
     }
+
+    /** The route that last gave a real answer; tried first next time. */
+    @Volatile private var lastGood: Int? = null
 
     @android.annotation.SuppressLint("NewApi")
     private fun recognizerFor(route: Int): SpeechRecognizer? = recs[route] ?: runCatching {
@@ -158,6 +164,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
                 val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                 alternatives = all.drop(1)
                 AppLog.d("ASR", "route $route heard: ${all.firstOrNull().orEmpty()}")
+                if (all.isNotEmpty()) lastGood = route
                 listener.onFinal(all.firstOrNull().orEmpty())
             }
 

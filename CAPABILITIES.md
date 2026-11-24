@@ -254,3 +254,6 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 
 ## Round 11
 - Google online recognition answered in English only: Google's recogniser ignores the chosen language unless `android.speech.extra.EXTRA_ADDITIONAL_LANGUAGES` is sent (even empty). It is now always sent (correct key), plus the short spelling, plus Android 14+ language detection limited to the chosen languages when two are on.
+
+## Round 12
+- From the device log: the speech service found by name failed often (errors 13, 11, 3) while the phone's default recogniser heard Hindi correctly. The default is now tried first, and the route that last gave an answer is remembered and tried first next time.
