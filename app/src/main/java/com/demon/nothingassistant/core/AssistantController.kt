@@ -122,6 +122,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
      */
     val amplitude = mutableFloatStateOf(0f)
 
+    /** The last spoken answer, shown under the glyph with copy / share / follow-up actions until the next request. */
+    val lastAnswer = androidx.compose.runtime.mutableStateOf<LastAnswer?>(null)
+
     private var workJob: Job? = null
     private var resetJob: Job? = null
     private var speakJob: Job? = null
@@ -241,6 +244,22 @@ class AssistantController(private val context: Context, val settings: Settings) 
     /** Starts a new request. The recent conversation is kept for two minutes so follow-ups still make sense. */
     fun startListening() {
         beginListening(Mode.COMMAND)
+    }
+
+    /** A request typed or tapped instead of spoken (suggestion chips, follow-up buttons, the text box). */
+    fun submitText(text: String) {
+        val t = text.trim()
+        if (t.isEmpty()) return
+        haptics.veryLightTap()
+        stopEverything()
+        process(t)
+    }
+
+    /** Says the last answer again. */
+    fun repeatLast() {
+        val a = lastAnswer.value ?: return
+        stopEverything()
+        respond(a.question, a.answer)
     }
 
     /** Cancel from any state; always releases the microphone and silences the voice. */
@@ -398,6 +417,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     // ---- Understanding and doing ----
 
     private fun process(raw: String) {
+        lastAnswer.value = null
         liveAdd(true, raw)
         liveFails = 0
         val awaiting = awaitingMore
@@ -774,6 +794,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun respond(text: String, rawReply: String) {
         val reply = com.demon.nothingassistant.ai.TextClean.decode(rawReply)
         val token = ++flow
+        lastAnswer.value = LastAnswer(text, reply)
         transition(AssistantState.SPEAKING, "", text, reply = reply)
         haptics.veryLightTap()
         say(reply) { if (token == flow) afterReply() }

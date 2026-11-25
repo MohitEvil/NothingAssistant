@@ -27,6 +27,9 @@ data class PendingConfirm(
     val declineAsFailure: Boolean = true
 )
 
+/** The last thing the assistant said, kept on screen after it finishes speaking so it can be copied, shared or followed up. */
+data class LastAnswer(val question: String, val answer: String)
+
 data class UiState(
     val state: AssistantState = AssistantState.IDLE,
     /** uptimeMillis when [state] was entered; lets one-shot animations (check, shake) time themselves. */

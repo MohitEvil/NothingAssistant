@@ -161,6 +161,10 @@ class Settings(context: Context) {
         private set
     var wakeSens by mutableStateOf(sp.getFloat("wake_sens", 0.5f))
         private set
+    /** True once the welcome setup has been completed or skipped. */
+    var onboarded by mutableStateOf(sp.getBoolean("onboarded", false))
+        private set
+
     /** Wake only for the voice that was trained in Voice Match. */
     var voiceLock by mutableStateOf(sp.getBoolean("voice_lock", true))
         private set
@@ -393,6 +397,7 @@ class Settings(context: Context) {
     @JvmName("applySecondLang")
     fun setSecondLang(v: String) { secondLang = v; sp.edit().putString("second_lang", v).apply() }
     @JvmName("applyVoiceLock")
+    fun setOnboarded(v: Boolean) { onboarded = v; sp.edit().putBoolean("onboarded", v).apply() }
     fun setVoiceLock(v: Boolean) { voiceLock = v; sp.edit().putBoolean("voice_lock", v).apply() }
     @JvmName("applyWakeSens")
     fun setWakeSens(v: Float) { wakeSens = v; sp.edit().putFloat("wake_sens", v).apply() }

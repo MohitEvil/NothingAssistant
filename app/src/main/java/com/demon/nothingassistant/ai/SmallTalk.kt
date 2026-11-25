@@ -188,6 +188,7 @@ object SmallTalk {
         }
 
         calculate(t)?.let { return it }
+        QuickAnswers.answer(t)?.let { return it }
 
         // Another one / repeat
         if (Regex("^(another one|one more|again|more|aur sunao|ek aur|next one|next)$").matches(t)) {

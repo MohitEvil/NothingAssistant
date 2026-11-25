@@ -257,3 +257,10 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 
 ## Round 12
 - From the device log: the speech service found by name failed often (errors 13, 11, 3) while the phone's default recogniser heard Hindi correctly. The default is now tried first, and the route that last gave an answer is remembered and tried first next time.
+
+## Round 13: welcome, answers, quick answers, stability
+- Welcome setup on first launch: name, microphone, alerts, overlay, accessibility, default assistant and Voice Match, one step at a time, each skippable, with live "allowed" status that refreshes when you return from system settings. Updating users skip it.
+- After every spoken answer the card stays on screen: COPY, SHARE, SAY AGAIN, and follow-ups (tell me more, simpler, shorter, in Hindi). A SPEAK AGAIN button appears after a result or failure.
+- Idle screen: greeting by time of day, four tappable example commands that change through the day, and a box to type a request.
+- New instant offline answers: unit conversion (length, weight, volume, temperature), dice, random number between two numbers, days until a date.
+- Crashes are written to the log before the app closes.

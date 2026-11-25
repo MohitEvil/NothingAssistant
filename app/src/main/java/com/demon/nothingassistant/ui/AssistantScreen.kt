@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -60,7 +61,12 @@ fun AssistantScreen(
     onConfirm: () -> Unit,
     onDismissConfirm: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenLive: () -> Unit = {}
+    onOpenLive: () -> Unit = {},
+    lastAnswer: com.demon.nothingassistant.core.LastAnswer? = null,
+    userName: String = "",
+    onSubmitText: (String) -> Unit = {},
+    onRepeat: () -> Unit = {},
+    onDismissAnswer: () -> Unit = {}
 ) {
     val fps = targetFps(ui.state, perf)
     val clock = rememberGlyphClock(fps)
@@ -73,6 +79,7 @@ fun AssistantScreen(
             .fillMaxSize()
             .glassBackdrop(palette)
             .systemBarsPadding()
+            .imePadding()
             .padding(horizontal = 24.dp)
     ) {
         // Top bar
@@ -174,7 +181,7 @@ fun AssistantScreen(
                         )
                     }
                 } else {
-                    val subtitle = if (ui.state == AssistantState.IDLE) "Tap the glyph to speak" else ui.status
+                    val subtitle = if (ui.state == AssistantState.IDLE) greeting(userName) + " · tap the glyph to speak" else ui.status
                     StatusLine(
                         subtitle,
                         palette.muted,
@@ -235,17 +242,16 @@ fun AssistantScreen(
                         modifier = Modifier.padding(horizontal = 40.dp).fillMaxWidth()
                     )
                 AssistantState.IDLE -> {
-                    Text("TRY", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 2.sp)
-                    Spacer(Modifier.height(6.dp))
-                    listOf(
-                        "“turn on the flashlight”",
-                        "“set a timer for 5 minutes”",
-                        "“text Mom saying on my way”",
-                        "“how are you?”"
-                    ).forEach {
-                        Text(it, color = palette.muted.copy(alpha = 0.8f), fontFamily = mono, fontSize = 12.sp)
+                    if (lastAnswer != null) {
+                        AnswerCard(lastAnswer, palette, onFollowUp = onSubmitText, onRepeat = onRepeat, onDismiss = onDismissAnswer)
+                    } else {
+                        SuggestionChips(palette, onSubmitText)
                     }
+                    Spacer(Modifier.height(12.dp))
+                    TypeBox(palette, onSubmitText)
                 }
+                AssistantState.FAILURE, AssistantState.SUCCESS ->
+                    PillButton("SPEAK AGAIN", filled = true, palette = palette, onClick = onGlyphTap, modifier = Modifier.padding(horizontal = 40.dp).fillMaxWidth())
                 else -> Unit
             }
             if (perf != PerfMode.NORMAL) {

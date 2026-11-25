@@ -52,6 +52,9 @@ class MainActivity : ComponentActivity() {
     /** Set when the bubble or the assist gesture launched us: start listening as soon as the mic is allowed. */
     private var autoStart by mutableStateOf(false)
 
+    /** Bumped every time the app comes back to the front, so the setup screen re-reads which permissions are on. */
+    private var resumeTick by mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -72,6 +75,7 @@ class MainActivity : ComponentActivity() {
         runCatching { com.demon.nothingassistant.priv.AutoGrant.noteAssistant(this) }
         runCatching { if (settings.wakeWord && !com.demon.nothingassistant.service.WakeService.running) com.demon.nothingassistant.service.WakeService.start(this) }
         resumed = true
+        resumeTick++
     }
 
     override fun onPause() {
@@ -137,10 +141,13 @@ class MainActivity : ComponentActivity() {
         val contactsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val anyPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        var setupTick by remember { mutableStateOf(0) }
+        val setupMicLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { setupTick++ }
+        val setupNotifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { setupTick++ }
 
         // First launch: ask for notifications (needed to show the bubble service) once.
         LaunchedEffect(Unit) {
-            if (Build.VERSION.SDK_INT >= 33 &&
+            if (settings.onboarded && Build.VERSION.SDK_INT >= 33 &&
                 checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
                 notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -156,6 +163,7 @@ class MainActivity : ComponentActivity() {
             if (autoStart) {
                 autoStart = false
                 showSettings = false
+                if (!settings.onboarded) settings.setOnboarded(true) // launched by the bubble or the assist gesture: already set up
                 if (ui.state == AssistantState.IDLE || ui.state == AssistantState.SUCCESS || ui.state == AssistantState.FAILURE) {
                     startOrAsk()
                 }
@@ -190,7 +198,16 @@ class MainActivity : ComponentActivity() {
         }
 
         com.demon.nothingassistant.ui.GlassRoot(palette) {
-        if (showLive) {
+        if (!settings.onboarded) {
+            com.demon.nothingassistant.ui.WelcomeScreen(
+                settings = settings,
+                palette = palette,
+                refresh = resumeTick + setupTick,
+                onAllowMic = { setupMicLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                onAllowNotifications = { if (Build.VERSION.SDK_INT >= 33) setupNotifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                onFinish = { setupTick++ }
+            )
+        } else if (showLive) {
             com.demon.nothingassistant.ui.LiveScreen(
                 controller = controller, ui = ui, settings = settings, palette = palette,
                 onClose = { controller.stopLive(); showLive = false }
@@ -309,6 +326,11 @@ class MainActivity : ComponentActivity() {
                         else -> controller.onGlyphTap()
                     }
                 },
+                lastAnswer = controller.lastAnswer.value,
+                userName = settings.userName,
+                onSubmitText = controller::submitText,
+                onRepeat = controller::repeatLast,
+                onDismissAnswer = { controller.lastAnswer.value = null },
                 onCancel = controller::cancel,
                 onConfirm = controller::confirmPending,
                 onDismissConfirm = controller::dismissPending,
