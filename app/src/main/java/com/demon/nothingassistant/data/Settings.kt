@@ -396,8 +396,9 @@ class Settings(context: Context) {
     fun setGoogleOffline(v: List<String>) { googleOffline = v.distinct().sorted(); sp.edit().putStringSet("google_offline", googleOffline.toSet()).apply() }
     @JvmName("applySecondLang")
     fun setSecondLang(v: String) { secondLang = v; sp.edit().putString("second_lang", v).apply() }
-    @JvmName("applyVoiceLock")
+    @JvmName("applyOnboarded")
     fun setOnboarded(v: Boolean) { onboarded = v; sp.edit().putBoolean("onboarded", v).apply() }
+    @JvmName("applyVoiceLock")
     fun setVoiceLock(v: Boolean) { voiceLock = v; sp.edit().putBoolean("voice_lock", v).apply() }
     @JvmName("applyWakeSens")
     fun setWakeSens(v: Float) { wakeSens = v; sp.edit().putFloat("wake_sens", v).apply() }
