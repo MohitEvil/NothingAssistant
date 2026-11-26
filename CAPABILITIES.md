@@ -271,3 +271,9 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - The agent waits less after each tap (it polls the screen every 0.12 s), takes screenshots only when the screen is sparse or the last step changed nothing, and sends them smaller. Password fields are never read out to the AI (idea taken from the AndroidHarness assistant).
 - Setup redesigned: animated pixel-art picture for every step, segmented progress bar, fades between steps, ALLOWED / NOT YET / REQUIRED chips, and a summary of what is on at the end.
 - New idle suggestions: summarize this screen, explain what's on my screen, help me reply to this message.
+
+## Round 15 — Whisper hearing, memory, premium icons
+- **Whisper speech recognition** (Groq, free key): records the sentence, finds the end by silence, sends one small WAV. Far more accurate for accents, Hinglish and names. Falls back to the normal recognisers for that same turn if the network, key or rate limit fails, and rests for a minute. Settings → Voice → Speech recognition → Whisper.
+- **Memory that grows**: the assistant keeps lasting facts you tell it ("my sister is Riya", "I'm vegetarian"), explicit "remember that…" notes, and the apps you open most. A short ranked block goes into the AI's instructions; names also feed Whisper's vocabulary. Say "what do you know about me", "forget …", "forget everything about me". Persona page → Memory lets you switch it off, remove items or clear all. Stored only on the phone.
+- **Edge voice retries** for 429, 5xx and empty audio, with a short back-off.
+- **New icons**: stroke icons from the Lucide family (same as AndroidHarness) replace the dot icons. They draw themselves on stroke by stroke, and the welcome icons breathe and glow. Each setting and page has its own icon.

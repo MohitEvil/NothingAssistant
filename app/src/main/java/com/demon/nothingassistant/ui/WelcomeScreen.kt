@@ -136,7 +136,7 @@ fun WelcomeScreen(
                 BoxWithConstraints(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     val pitch = minOf(5.dp, maxWidth / dotTextCols(inf.title))
                     Column(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 12.dp)) {
-                        DotIcon(ICONS[pg] ?: ICONS.getValue("assistant"), palette, Modifier.size(112.dp))
+                        LineIcon(ICONS[pg] ?: Ic.SPARKLES, palette.fg, size = 96.dp, stroke = 1.4f, accent = palette.muted, live = true)
                         Spacer(Modifier.height(26.dp))
                         DotText(text = inf.title, color = palette.fg, offColor = palette.dim.copy(alpha = 0.45f), pitch = pitch)
                         Spacer(Modifier.height(20.dp))
@@ -256,33 +256,14 @@ private fun StatusChip(text: String, ok: Boolean, palette: GlyphPalette) {
     }
 }
 
-/** A 9 by 9 dot-matrix picture whose dots shimmer in a slow wave. */
-@Composable
-private fun DotIcon(rows: List<String>, palette: GlyphPalette, modifier: Modifier = Modifier) {
-    val t = rememberInfiniteTransition(label = "icon")
-    val phase by t.animateFloat(0f, 6.2831855f, infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart), label = "phase")
-    Canvas(modifier) {
-        val cell = size.minDimension / 9f
-        for (r in 0 until 9) for (c in 0 until 9) {
-            val on = rows.getOrNull(r)?.getOrNull(c) == '#'
-            val a = if (on) 0.62f + 0.38f * kotlin.math.sin(phase + (r + c) * 0.55f).toFloat().let { (it + 1f) / 2f } else 1f
-            drawCircle(
-                color = if (on) palette.fg.copy(alpha = a) else palette.dim.copy(alpha = 0.35f),
-                radius = cell * (if (on) 0.36f else 0.12f),
-                center = Offset((c + 0.5f) * cell, (r + 0.5f) * cell)
-            )
-        }
-    }
-}
-
-private val ICONS: Map<String, List<String>> = mapOf(
-    "hello" to listOf("..#####..", ".#.....#.", "#.......#", "#...#...#", "#..###..#", "#...#...#", "#.......#", ".#.....#.", "..#####.."),
-    "assistant" to listOf("..#####..", ".#.....#.", "#.......#", "#...#...#", "#..###..#", "#...#...#", "#.......#", ".#.....#.", "..#####.."),
-    "name" to listOf("...###...", "..#####..", "..#####..", "...###...", ".........", ".#######.", "#########", "#########", "........."),
-    "mic" to listOf("...###...", "..#####..", "..#####..", "..#####..", "#.#####.#", "#..###..#", ".#.....#.", "....#....", "..#####.."),
-    "notif" to listOf("....#....", "...###...", "..#####..", "..#####..", "..#####..", ".#######.", "#########", "...###...", "........."),
-    "overlay" to listOf("######...", "#....#...", "#....#...", "#..######", "#..#....#", "######..#", "...#....#", "...#....#", "...######"),
-    "access" to listOf("#........", "##.......", "###......", "####.....", "#####....", "######...", "##.##....", "#..##....", "....##..."),
-    "voice" to listOf("....#....", "....#.#..", "..#.#.#..", "#.#.#.#.#", "#.#.#.#.#", "#.#.#.#.#", "..#.#.#..", "....#.#..", "....#...."),
-    "ready" to listOf(".........", "........#", ".......##", "#.....##.", "##...##..", ".##.##...", "..###....", "...#.....", ".........")
+private val ICONS: Map<String, Ic> = mapOf(
+    "hello" to Ic.HAND,
+    "assistant" to Ic.BOT,
+    "name" to Ic.USER,
+    "mic" to Ic.MIC,
+    "notif" to Ic.BELL,
+    "overlay" to Ic.LAYERS,
+    "access" to Ic.SHIELD,
+    "voice" to Ic.WAVEFORM,
+    "ready" to Ic.CHECK
 )

@@ -141,11 +141,21 @@ object EdgeTts {
         if (text.none { it.isLetterOrDigit() }) throw IllegalArgumentException("Nothing to speak")
         if (short.isBlank()) throw IllegalStateException("Choose an Edge voice first.")
         refreshBuild(false)
-        return try {
-            request(text.take(4000), short, speed)
-        } catch (e: EdgeError) {
-            if (e.status == 403) { refreshBuild(true); request(text.take(4000), short, speed) } else throw e
+        // 403 = stale client build (refresh it); 429, 5xx and "no audio" are brief server hiccups, so one or two quick retries usually fix them.
+        var last: Exception? = null
+        for (attempt in 0..2) {
+            try {
+                return request(text.take(4000), short, speed)
+            } catch (e: EdgeError) {
+                last = e
+                val st = e.status
+                val transient = st == 429 || (st != null && st >= 500) || e.message.orEmpty().contains("no audio", true)
+                if (st == 403 && attempt == 0) refreshBuild(true)
+                else if (transient && attempt < 2) Thread.sleep(250L * (attempt + 1) * (if (st == 429) 3 else 1))
+                else throw e
+            }
         }
+        throw last ?: IOException("Edge voice failed")
     }
 
     private fun request(text: String, short: String, speed: Float): ByteArray {

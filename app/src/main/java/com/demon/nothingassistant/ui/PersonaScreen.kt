@@ -130,6 +130,28 @@ fun PersonaScreen(
             Spacer(Modifier.height(6.dp))
             Text(testResult, color = palette.fg, fontSize = 15.sp)
         }
+
+        Spacer(Modifier.height(28.dp))
+        SectionLabel("MEMORY", palette)
+        Card(palette) {
+            ToggleRow("Learn about me", "Remembers what you tell it and the apps you open most, so answers get more personal over time. Stays on this phone.", settings.memoryOn, palette) { settings.setMemoryOn(it) }
+        }
+        var memTick by remember { mutableStateOf(0) }
+        val facts = remember(memTick, settings.memoryOn) { com.demon.nothingassistant.ai.Mem.all() }
+        Spacer(Modifier.height(10.dp))
+        if (facts.isEmpty()) {
+            Text("Nothing saved yet. Say \"remember that my sister is Riya\", or just talk to me.", color = palette.muted, fontSize = 12.sp)
+        } else {
+            facts.take(30).forEach { f ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(f.text, color = palette.fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Text("REMOVE", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 2.sp,
+                        modifier = Modifier.clickable { com.demon.nothingassistant.ai.Mem.remove(f); memTick++ }.padding(8.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            PillButton("FORGET EVERYTHING", filled = false, palette = palette, onClick = { com.demon.nothingassistant.ai.Mem.clear(); memTick++ }, modifier = Modifier.fillMaxWidth())
+        }
         Spacer(Modifier.height(32.dp))
     }
 }

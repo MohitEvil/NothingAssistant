@@ -108,22 +108,22 @@ fun SettingsScreen(
         Spacer(Modifier.height(24.dp))
         SectionLabel("CUSTOMISE", palette)
         Card(palette) {
-            NavRow(DotIcons.VOICE, "Live mode", "Hands-free spoken conversation, like a phone call", palette, onOpenLive)
+            NavRow(Ic.AUDIO_LINES, "Live mode", "Hands-free spoken conversation, like a phone call", palette, onOpenLive)
             Divider(palette)
-            NavRow(DotIcons.VOICE, "Voice", "Voice, language, speech recognition and speed", palette, onOpenVoice)
+            NavRow(Ic.MIC, "Voice", "Voice, language, speech recognition and speed", palette, onOpenVoice)
             Divider(palette)
             NavRow(
-                DotIcons.AI, "AI settings",
+                Ic.SPARKLES, "AI settings",
                 "Chat: " + (if (!settings.aiEnabled) "off" else settings.providers.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider") +
                     "  ·  Voice: " + (if (!settings.aiVoiceEnabled) "off" else settings.voiceProviders.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider"),
                 palette, onOpenAi
             )
             Divider(palette)
-            NavRow(DotIcons.APPEARANCE, "Appearance", "Theme, liquid glass, blob and animations", palette, onOpenAppearance)
+            NavRow(Ic.PALETTE, "Appearance", "Theme, liquid glass, blob and animations", palette, onOpenAppearance)
             Divider(palette)
-            NavRow(DotIcons.ACCESS, "Access and permissions", "Phone control, app permissions, Shizuku and root", palette, onOpenAccess)
+            NavRow(Ic.SHIELD, "Access and permissions", "Phone control, app permissions, Shizuku and root", palette, onOpenAccess)
             Divider(palette)
-            NavRow(DotIcons.LOG, "Debug log", "Temporary: see what the app and voices are doing", palette, onOpenLog)
+            NavRow(Ic.TERMINAL, "Debug log", "Temporary: see what the app and voices are doing", palette, onOpenLog)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -146,12 +146,12 @@ fun SettingsScreen(
 
 /** A row that opens a page: dot icon, title, one line of state, chevron. */
 @Composable
-internal fun NavRow(icon: List<String>, title: String, subtitle: String, palette: GlyphPalette, onClick: () -> Unit) {
+internal fun NavRow(icon: Ic, title: String, subtitle: String, palette: GlyphPalette, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().squish(onClick = onClick).padding(horizontal = 18.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        DotIcon(icon, palette.fg)
+        IconTile(icon, palette)
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(title, color = palette.fg, fontSize = 15.sp)

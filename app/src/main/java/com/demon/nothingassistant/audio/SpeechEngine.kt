@@ -55,6 +55,14 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     private val vosk get() = VoskAsr.get(context)
     private var usingDevice = false
 
+    private val whisper = WhisperAsr()
+    private var usingWhisper = false
+    private var whisperDownUntil = 0L
+
+    /** Settings-backed Whisper config, set by the controller: key, model, on/off, and a vocabulary hint. Null key = off. */
+    var whisperConfig: () -> WhisperConfig? = { null }
+    class WhisperConfig(val key: String, val model: String, val baseUrl: String, val vocabulary: String)
+
     /** Other languages to listen for besides the main one (set by the controller; empty = single language). */
     var extraLanguages: () -> List<String> = { emptyList() }
 
@@ -74,6 +82,24 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
         val systemOk = SpeechRecognizer.isRecognitionAvailable(context) || realService() != null
         val online = SpeechInfo.online(context)
         val offlineNow = preferOffline || !online
+        usingWhisper = false
+        val wc = if (choice == "auto" && online && !preferOffline && System.currentTimeMillis() > whisperDownUntil) whisperConfig() else null
+        if (wc != null && wc.key.isNotBlank()) {
+            usingDevice = false
+            usingWhisper = true
+            generation++
+            recs.values.forEach { runCatching { it.cancel() } }
+            Cue.hushSystemBeep(context, 20_000)
+            AppLog.d("ASR", "turn via Whisper model=${wc.model}")
+            whisper.start(wc.key, wc.model, wc.baseUrl, wc.vocabulary, listener) { why ->
+                // Whisper itself failed (network, key, rate limit): use the normal recognisers for this same turn, and rest Whisper briefly.
+                AppLog.d("ASR", "Whisper unavailable ($why); falling back")
+                whisperDownUntil = System.currentTimeMillis() + 60_000
+                usingWhisper = false
+                begin(tag0, preferOffline, choice)
+            }
+            return
+        }
         val deviceChoice = choice == "device" || choice == "live" || choice == "accurate" || choice == "twopass"
         val autoDevice = choice == "auto" && (!systemOk || (offlineNow && !SpeechInfo.hasOffline(tag) && vosk.anyInstalled()))
         if (deviceChoice || autoDevice) {
@@ -217,6 +243,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
 
     /** Stop capturing and deliver whatever was heard so far. */
     fun stopListening() {
+        if (usingWhisper) { whisper.finish(); return }
         if (usingDevice) { vosk.finish(); return }
         Cue.hushThenRelease(context, 1500)
         current?.stopListening()
@@ -225,6 +252,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     /** Stop listening and ignore anything still on its way. The recognizer is kept for the next turn. */
     fun cancel() {
         generation++
+        if (usingWhisper) { whisper.cancel(); Cue.hushThenRelease(context, 1500); return }
         if (usingDevice) { vosk.cancel(); return }
         Cue.hushThenRelease(context, 1500)
         current?.let { runCatching { it.cancel() } }
@@ -233,6 +261,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     /** Tear the recognizer down completely (screen closed, or the service dropped). */
     fun release() {
         generation++
+        whisper.cancel()
         if (usingDevice) vosk.cancel()
         Cue.hushThenRelease(context, 1500)
         recs.values.forEach { runCatching { it.cancel() }; runCatching { it.destroy() } }

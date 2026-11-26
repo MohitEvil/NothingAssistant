@@ -128,7 +128,7 @@ class Brain(private val settings: Settings) {
         val anthropic = p.id == "anthropic" || base.contains("anthropic.com")
         // Fast mode (planning and screen steps): no thinking, short reply. The answer is a small JSON object, so deliberating only costs seconds.
         val thinking = settings.aiThinking && !fast
-        val system = (systemOverride ?: systemPrompt()) + genderClause()
+        val system = (systemOverride ?: systemPrompt()) + genderClause() + (if (systemOverride == null) Mem.block(userText) else "")
 
         val messages = JSONArray()
         if (!anthropic) messages.put(msg("system", system))

@@ -331,7 +331,16 @@ class AssistantController(private val context: Context, val settings: Settings) 
         return pool.filter { it.substringBefore('-').lowercase() != primary }.distinctBy { it.substringBefore('-').lowercase() }.take(2)
     }
 
-    init { speech.extraLanguages = { secondLangs() } }
+    init {
+        speech.extraLanguages = { secondLangs() }
+        com.demon.nothingassistant.ai.Mem.init(context)
+        com.demon.nothingassistant.ai.Mem.on = { settings.memoryOn }
+        speech.whisperConfig = {
+            val k = settings.whisperKey()
+            if (!settings.whisperOn || k.isBlank()) null
+            else com.demon.nothingassistant.audio.SpeechEngine.WhisperConfig(k, settings.whisperModel, com.demon.nothingassistant.audio.WhisperAsr.GROQ, com.demon.nothingassistant.ai.Mem.vocabulary())
+        }
+    }
 
     private fun beginListening(m: Mode) {
         resetJob?.cancel()
@@ -596,6 +605,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 success("Done. I've forgotten the shortcuts I learned.", text)
                 return@launch
             }
+            com.demon.nothingassistant.ai.Mem.command(text)?.let { if (settings.memoryOn) { success(it, text); return@launch } }
             if (forgetChat.matches(text.trim())) {
                 history.clear()
                 success("Done. I've cleared our chat history.", text)
@@ -631,6 +641,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             is ActionResult.Success -> {
                 val launch = result.launch
                 history.addPair(text, result.message.ifBlank { "Done." }, "action")
+                if (settings.memoryOn && cmd is Command.OpenApp) com.demon.nothingassistant.ai.Mem.noteApp(cmd.name)
                 com.demon.nothingassistant.intent.FollowUp.remember(text, cmd)
                 pendingLearn?.let { (t, raw) -> if (t == text) com.demon.nothingassistant.agent.Skills.learn(t, raw) }
                 replayPattern?.let { com.demon.nothingassistant.agent.Skills.succeeded(it) }
@@ -789,7 +800,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
         respond(text, SmallTalk.fallback(question))
     }
 
-    private fun remember(user: String, reply: String) = history.addPair(user, reply, "chat")
+    private fun remember(user: String, reply: String) {
+        history.addPair(user, reply, "chat")
+        if (settings.memoryOn) scope.launch { runCatching { com.demon.nothingassistant.ai.Mem.learn(brain, user) } }
+    }
 
     /** Shows and speaks an answer, then opens the mic again for a follow-up. */
     private fun respond(text: String, rawReply: String) {

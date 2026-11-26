@@ -165,6 +165,24 @@ class Settings(context: Context) {
     var onboarded by mutableStateOf(sp.getBoolean("onboarded", false))
         private set
 
+    /** Whisper (speech to text through Groq): accurate for every language and mixed speech. Used when online and a key is set. */
+    var whisperOn by mutableStateOf(sp.getBoolean("whisper_on", true))
+        private set
+    var sttKey by mutableStateOf(sp.getString("stt_key", "") ?: "")
+        private set
+    var whisperModel by mutableStateOf(sp.getString("whisper_model", "whisper-large-v3-turbo") ?: "whisper-large-v3-turbo")
+        private set
+
+    /** Learn facts and habits from what you say, and use them to personalise answers. */
+    var memoryOn by mutableStateOf(sp.getBoolean("memory_on", true))
+        private set
+
+    /** The key Whisper uses: the one set here, else the Groq key already added for chat or voice. Blank if none. */
+    fun whisperKey(): String =
+        sttKey.trim().ifBlank {
+            (providers.toList() + voiceProviders.toList()).firstOrNull { it.baseUrl.contains("groq.com") && it.key.isNotBlank() }?.key.orEmpty().trim()
+        }
+
     /** Wake only for the voice that was trained in Voice Match. */
     var voiceLock by mutableStateOf(sp.getBoolean("voice_lock", true))
         private set
@@ -398,6 +416,14 @@ class Settings(context: Context) {
     fun setSecondLang(v: String) { secondLang = v; sp.edit().putString("second_lang", v).apply() }
     @JvmName("applyOnboarded")
     fun setOnboarded(v: Boolean) { onboarded = v; sp.edit().putBoolean("onboarded", v).apply() }
+    @JvmName("applyWhisperOn")
+    fun setWhisperOn(v: Boolean) { whisperOn = v; sp.edit().putBoolean("whisper_on", v).apply() }
+    @JvmName("applySttKey")
+    fun setSttKey(v: String) { sttKey = v.trim(); sp.edit().putString("stt_key", sttKey).apply() }
+    @JvmName("applyWhisperModel")
+    fun setWhisperModel(v: String) { whisperModel = v; sp.edit().putString("whisper_model", v).apply() }
+    @JvmName("applyMemoryOn")
+    fun setMemoryOn(v: Boolean) { memoryOn = v; sp.edit().putBoolean("memory_on", v).apply() }
     @JvmName("applyVoiceLock")
     fun setVoiceLock(v: Boolean) { voiceLock = v; sp.edit().putBoolean("voice_lock", v).apply() }
     @JvmName("applyWakeSens")

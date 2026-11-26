@@ -162,7 +162,7 @@ fun AccessScreen(
         }
         Spacer(Modifier.height(16.dp))
         Card(palette) {
-            NavRow(DotIcons.APPS, "App permissions", "Microphone, contacts, notifications in Android's app page", palette, onOpenAppPermissions)
+            NavRow(Ic.GRID, "App permissions", "Microphone, contacts, notifications in Android's app page", palette, onOpenAppPermissions)
         }
         Spacer(Modifier.height(16.dp))
         val grantScope = androidx.compose.runtime.rememberCoroutineScope()

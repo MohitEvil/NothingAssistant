@@ -10,6 +10,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -118,18 +119,18 @@ private fun HubPage(settings: Settings, voice: VoiceHub, palette: GlyphPalette, 
     )
     Spacer(Modifier.height(18.dp))
     Card(palette) {
-        NavRow(DotIcons.VOICE, "Speech recognition", "${SpeechInfo.niceName(settings.language)} · " + (if (installed > 0) "$installed offline language(s) downloaded" else "Google / system"), palette) { go("recog") }
+        NavRow(Ic.WAVEFORM, "Speech recognition", "${SpeechInfo.niceName(settings.language)} · " + (if (installed > 0) "$installed offline language(s) downloaded" else "Google / system"), palette) { go("recog") }
         Divider(palette)
-        NavRow(DotIcons.VOICE, "Voices", when {
+        NavRow(Ic.VOLUME, "Voices", when {
             settings.aiVoiceEnabled && settings.voiceProviders.any { it.ready } -> "Online voice in use"
             settings.voiceEngine == "neural" -> "Offline neural voice"
             settings.deviceVoice.isNotBlank() -> "Phone voice: ${settings.deviceVoice}"
             else -> "Phone voice (automatic)"
         }, palette) { go("voices") }
         Divider(palette)
-        NavRow(DotIcons.VOICE, "Wake word", if (settings.wakeWord) "On · \"${settings.wakePhrase}\"" else "Off", palette) { go("wake") }
+        NavRow(Ic.RADIO, "Wake word", if (settings.wakeWord) "On · \"${settings.wakePhrase}\"" else "Off", palette) { go("wake") }
         Divider(palette)
-        NavRow(DotIcons.GENERAL, "Behaviour", "Interrupt, voice gender, screen vision, default assistant", palette) { go("assist") }
+        NavRow(Ic.SLIDERS, "Behaviour", "Interrupt, voice gender, screen vision, default assistant", palette) { go("assist") }
     }
     Spacer(Modifier.height(20.dp))
     PillButton("TEST VOICE", filled = true, palette = palette, onClick = { voice.speak("Hey! This is how I sound. Pretty natural, right?") {} }, modifier = Modifier.fillMaxWidth())
@@ -216,6 +217,35 @@ private fun RecogPage(settings: Settings, palette: GlyphPalette, openVosk: () ->
     }
 
     Spacer(Modifier.height(24.dp))
+    SectionLabel("WHISPER · MOST ACCURATE", palette)
+    Text("Sends each sentence to Groq's free Whisper model: very accurate for accents, Hindi with English mixed in, and names, and it answers in under a second. Needs internet and a free key from console.groq.com. If it can't be reached, the normal recogniser takes over automatically.", color = palette.muted, fontSize = 12.sp)
+    Spacer(Modifier.height(10.dp))
+    Card(palette) {
+        ToggleRow("Use Whisper", if (settings.whisperKey().isBlank()) "Paste a key below to switch it on" else "On when online", settings.whisperOn, palette) { settings.setWhisperOn(it) }
+    }
+    Spacer(Modifier.height(10.dp))
+    androidx.compose.foundation.text.BasicTextField(
+        value = settings.sttKey,
+        onValueChange = { settings.setSttKey(it.trim()) },
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(color = palette.fg, fontSize = 14.sp),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.red),
+        decorationBox = { inner ->
+            Box { if (settings.sttKey.isBlank()) Text(if (settings.whisperKey().isNotBlank()) "Using your Groq key from the AI settings" else "gsk_… (Groq key)", color = palette.muted, fontSize = 14.sp); inner() }
+        },
+        modifier = Modifier.fillMaxWidth()
+            .background(palette.card, androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+            .border(androidx.compose.foundation.BorderStroke(1.dp, palette.dim), androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+            .padding(16.dp)
+    )
+    Spacer(Modifier.height(10.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        listOf("TURBO · FAST" to "whisper-large-v3-turbo", "LARGE · BEST" to "whisper-large-v3").forEach { (n, id) ->
+            Chip(n, settings.whisperModel == id, palette) { settings.setWhisperModel(id) }
+        }
+    }
+
+    Spacer(Modifier.height(24.dp))
     SectionLabel("VOSK · OFFLINE ENGINE", palette)
     Text(if (voskLangs.isEmpty()) "No Vosk language downloaded." else "Languages downloaded for my own offline recogniser. Tap one to speak it.", color = palette.muted, fontSize = 12.sp)
     if (voskLangs.isNotEmpty()) {
@@ -225,7 +255,7 @@ private fun RecogPage(settings: Settings, palette: GlyphPalette, openVosk: () ->
         }
     }
     Spacer(Modifier.height(12.dp))
-    Card(palette) { NavRow(DotIcons.VOICE, "Vosk languages", if (installedCount > 0) "$installedCount downloaded · add or remove" else "Download languages (Russian, Arabic, Hindi…)", palette, openVosk) }
+    Card(palette) { NavRow(Ic.GLOBE, "Vosk languages", if (installedCount > 0) "$installedCount downloaded · add or remove" else "Download languages (Russian, Arabic, Hindi…)", palette, openVosk) }
 }
 
 /** Every language the offline recogniser can learn, each downloaded once. */
@@ -304,11 +334,11 @@ private fun VoicesPage(settings: Settings, voice: VoiceHub, palette: GlyphPalett
     }
     Spacer(Modifier.height(18.dp))
     Card(palette) {
-        NavRow(DotIcons.VOICE, "Phone voices", if (settings.deviceVoice.isBlank()) "Automatic · choose from every voice installed" else settings.deviceVoice, palette, pickPhone)
+        NavRow(Ic.PHONE, "Phone voices", if (settings.deviceVoice.isBlank()) "Automatic · choose from every voice installed" else settings.deviceVoice, palette, pickPhone)
         Divider(palette)
-        NavRow(DotIcons.VOICE, "Downloadable offline voices", if (installedModels > 0) "$installedModels downloaded" else "Kokoro, Supertonic and more", palette, openNeural)
+        NavRow(Ic.DOWNLOAD, "Downloadable offline voices", if (installedModels > 0) "$installedModels downloaded" else "Kokoro, Supertonic and more", palette, openNeural)
         Divider(palette)
-        NavRow(DotIcons.AI, "Online voices", if (settings.aiVoiceEnabled) "On · Edge, Gemini, OpenAI…" else "Edge free voices and AI voice providers", palette, onOpenAiVoice)
+        NavRow(Ic.CLOUD, "Online voices", if (settings.aiVoiceEnabled) "On · Edge, Gemini, OpenAI…" else "Edge free voices and AI voice providers", palette, onOpenAiVoice)
     }
     Spacer(Modifier.height(24.dp))
     SectionLabel("SPEED", palette)
