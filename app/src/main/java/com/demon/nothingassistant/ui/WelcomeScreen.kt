@@ -8,6 +8,16 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -110,50 +120,66 @@ fun WelcomeScreen(
             )
         }
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             pages.forEachIndexed { i, _ ->
-                Box(Modifier.size(6.dp).background(if (i <= index) palette.fg else palette.dim, CircleShape))
+                Box(Modifier.weight(1f).height(3.dp).background(if (i <= index) palette.fg else palette.dim, RoundedCornerShape(2.dp)))
             }
         }
 
-        val title: String
-        val body: String
-        val note: String
-        when (page) {
-            "hello" -> { title = "HELLO"; body = "I'm your voice assistant. Talk to me to open apps, send messages, set timers, control settings and ask questions. A few quick steps and I'm ready."; note = "Everything here can be changed later in Settings." }
-            "name" -> { title = "YOUR NAME"; body = "What should I call you?"; note = "Optional. I only use it to greet you." }
-            "mic" -> { title = "MICROPHONE"; body = "So I can hear you. I only listen after you tap me or say the wake phrase, and the mic is closed the rest of the time."; note = if (micOk) "Allowed." else "Required to talk to me." }
-            "notif" -> { title = "ALERTS"; body = "Lets me show the small notice Android requires while the bubble or wake word is running, and read out your notifications if you ask."; note = if (notifOk) "Allowed." else "Recommended." }
-            "overlay" -> { title = "OVERLAY"; body = "Lets me appear over other apps when you call me, and show the floating bubble. Switch on \"Allow display over other apps\"."; note = if (overlayOk) "Allowed." else "Recommended." }
-            "access" -> { title = "CONTROL"; body = "Lets me tap, scroll and type for you, like opening a chat and sending a message. Find Nothing Assistant in the list and switch it on."; note = if (accessOk) "Switched on." else "If the switch is greyed out: App info, three dots menu, \"Allow restricted settings\", then try again." }
-            "assistant" -> { title = "ASSISTANT"; body = "Make me the default digital assistant so the power-button hold or home-corner swipe opens me instead of another assistant."; note = if (assistOk) "I'm the default assistant." else "Optional." }
-            "voice" -> { title = "MY VOICE"; body = "Teach me your voice so I answer only to you, and wake when you say the phrase. It takes about a minute and everything stays on this phone."; note = if (voiceOk) "Already set up." else "Optional." }
-            else -> { title = "READY"; body = "That's it. Tap the glyph and speak, or type a request. Try \"what can you do\" to hear everything I'm able to help with."; note = "" }
-        }
+        // Live "is it done" for each page that needs something.
+        fun okOf(p: String): Boolean? = when (p) { "mic" -> micOk; "notif" -> notifOk; "overlay" -> overlayOk; "access" -> accessOk; "assistant" -> assistOk; "voice" -> voiceOk; else -> null }
 
-        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
-            val pitch = minOf(5.dp, maxWidth / dotTextCols(title))
-            Column(Modifier.fillMaxWidth().padding(top = 36.dp)) {
-                DotText(text = title, color = palette.fg, offColor = palette.dim.copy(alpha = 0.45f), pitch = pitch)
-                Spacer(Modifier.height(24.dp))
-                Text(body, color = palette.fg, fontSize = 17.sp, lineHeight = 25.sp)
-                if (page == "name") {
-                    Spacer(Modifier.height(18.dp))
-                    Box(
-                        Modifier.fillMaxWidth().border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(50)).padding(horizontal = 18.dp, vertical = 14.dp)
-                    ) {
-                        if (name.isEmpty()) Text("Your name", color = palette.muted, fontSize = 16.sp)
-                        BasicTextField(
-                            value = name, onValueChange = { name = it.take(30) }, singleLine = true,
-                            textStyle = TextStyle(color = palette.fg, fontSize = 16.sp), cursorBrush = SolidColor(palette.fg),
-                            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            Crossfade(targetState = index, animationSpec = tween(240), label = "welcome") { i ->
+                val pg = pages[i]
+                val inf = pageInfo(pg, okOf(pg) == true, accessOk)
+                BoxWithConstraints(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    val pitch = minOf(5.dp, maxWidth / dotTextCols(inf.title))
+                    Column(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 12.dp)) {
+                        DotIcon(ICONS[pg] ?: ICONS.getValue("assistant"), palette, Modifier.size(112.dp))
+                        Spacer(Modifier.height(26.dp))
+                        DotText(text = inf.title, color = palette.fg, offColor = palette.dim.copy(alpha = 0.45f), pitch = pitch)
+                        Spacer(Modifier.height(20.dp))
+                        Text(inf.body, color = palette.fg, fontSize = 17.sp, lineHeight = 25.sp)
+                        if (pg == "name") {
+                            Spacer(Modifier.height(18.dp))
+                            Box(
+                                Modifier.fillMaxWidth().border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(50)).padding(horizontal = 18.dp, vertical = 14.dp)
+                            ) {
+                                if (name.isEmpty()) Text("Your name", color = palette.muted, fontSize = 16.sp)
+                                BasicTextField(
+                                    value = name, onValueChange = { name = it.take(30) }, singleLine = true,
+                                    textStyle = TextStyle(color = palette.fg, fontSize = 16.sp), cursorBrush = SolidColor(palette.fg),
+                                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                        okOf(pg)?.let { ok ->
+                            Spacer(Modifier.height(18.dp))
+                            StatusChip(if (ok) "ALLOWED" else if (pg == "mic") "REQUIRED" else "NOT YET", ok, palette)
+                        }
+                        if (inf.note.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            Text(inf.note, color = palette.muted, fontFamily = mono, fontSize = 12.sp, lineHeight = 18.sp)
+                        }
+                        if (pg == "ready") {
+                            Spacer(Modifier.height(20.dp))
+                            Column(
+                                Modifier.fillMaxWidth().background(palette.card, RoundedCornerShape(20.dp)).border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(20.dp)).padding(horizontal = 16.dp, vertical = 8.dp)
+                            ) {
+                                listOf("mic" to "Microphone", "notif" to "Alerts", "overlay" to "Overlay", "access" to "Control", "assistant" to "Default assistant", "voice" to "Voice Match").forEach { (k, label) ->
+                                    val ok = okOf(k) == true
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(label, color = palette.fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                        Text(if (ok) "ON" else "LATER", color = if (ok) palette.fg else palette.muted, fontFamily = mono, fontSize = 11.sp, letterSpacing = 2.sp)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text("Anything marked LATER can be switched on in Settings whenever you like.", color = palette.muted, fontFamily = mono, fontSize = 11.sp, lineHeight = 16.sp)
+                        }
                     }
-                }
-                if (note.isNotEmpty()) {
-                    Spacer(Modifier.height(16.dp))
-                    Text(note, color = if (note.startsWith("Required")) palette.red else palette.muted, fontFamily = mono, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
         }
@@ -202,3 +228,61 @@ private fun openSafely(ctx: Context, intent: Intent) {
         runCatching { ctx.startActivity(Intent(AndroidSettings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 }
+
+
+private class PageInfo(val title: String, val body: String, val note: String)
+
+private fun pageInfo(page: String, ok: Boolean, accessOk: Boolean): PageInfo = when (page) {
+    "hello" -> PageInfo("HELLO", "I'm your voice assistant. Talk to me to open apps, send messages, set timers, control settings and ask questions. A few quick steps and I'm ready.", "Everything here can be changed later in Settings.")
+    "name" -> PageInfo("YOUR NAME", "What should I call you?", "Optional. I only use it to greet you.")
+    "mic" -> PageInfo("MICROPHONE", "So I can hear you. I only listen after you tap me or say the wake phrase, and the mic is closed the rest of the time.", "Needed to talk to me.")
+    "notif" -> PageInfo("ALERTS", "Lets me show the small notice Android requires while the bubble or wake word is running, and read out your notifications if you ask.", "Recommended.")
+    "overlay" -> PageInfo("OVERLAY", "Lets me appear over other apps when you call me, and show the floating bubble. Switch on \"Allow display over other apps\".", "Recommended.")
+    "access" -> PageInfo("CONTROL", "Lets me tap, scroll and type for you, like opening a chat and sending a message. Find Nothing Assistant in the list and switch it on.", if (accessOk) "" else "If the switch is greyed out: App info, three dots menu, \"Allow restricted settings\", then try again.")
+    "assistant" -> PageInfo("ASSISTANT", "Make me the default digital assistant so the power-button hold or home-corner swipe opens me instead of another assistant.", "Optional.")
+    "voice" -> PageInfo("MY VOICE", "Teach me your voice so I answer only to you, and wake when you say the phrase. It takes about a minute and everything stays on this phone.", "Optional. Everything stays on this phone.")
+    else -> PageInfo("READY", "That's it. Tap the glyph and speak, or type a request. Try \"what can you do\" to hear everything I can help with.", "")
+}
+
+@Composable
+private fun StatusChip(text: String, ok: Boolean, palette: GlyphPalette) {
+    Row(
+        Modifier.border(BorderStroke(1.dp, if (ok) palette.fg else palette.dim), RoundedCornerShape(50)).padding(horizontal = 14.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(7.dp).background(if (ok) palette.fg else if (text == "REQUIRED") palette.red else palette.dim, CircleShape))
+        Spacer(Modifier.size(8.dp))
+        Text(text, color = if (ok) palette.fg else palette.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
+    }
+}
+
+/** A 9 by 9 dot-matrix picture whose dots shimmer in a slow wave. */
+@Composable
+private fun DotIcon(rows: List<String>, palette: GlyphPalette, modifier: Modifier = Modifier) {
+    val t = rememberInfiniteTransition(label = "icon")
+    val phase by t.animateFloat(0f, 6.2831855f, infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart), label = "phase")
+    Canvas(modifier) {
+        val cell = size.minDimension / 9f
+        for (r in 0 until 9) for (c in 0 until 9) {
+            val on = rows.getOrNull(r)?.getOrNull(c) == '#'
+            val a = if (on) 0.62f + 0.38f * kotlin.math.sin(phase + (r + c) * 0.55f).toFloat().let { (it + 1f) / 2f } else 1f
+            drawCircle(
+                color = if (on) palette.fg.copy(alpha = a) else palette.dim.copy(alpha = 0.35f),
+                radius = cell * (if (on) 0.36f else 0.12f),
+                center = Offset((c + 0.5f) * cell, (r + 0.5f) * cell)
+            )
+        }
+    }
+}
+
+private val ICONS: Map<String, List<String>> = mapOf(
+    "hello" to listOf("..#####..", ".#.....#.", "#.......#", "#...#...#", "#..###..#", "#...#...#", "#.......#", ".#.....#.", "..#####.."),
+    "assistant" to listOf("..#####..", ".#.....#.", "#.......#", "#...#...#", "#..###..#", "#...#...#", "#.......#", ".#.....#.", "..#####.."),
+    "name" to listOf("...###...", "..#####..", "..#####..", "...###...", ".........", ".#######.", "#########", "#########", "........."),
+    "mic" to listOf("...###...", "..#####..", "..#####..", "..#####..", "#.#####.#", "#..###..#", ".#.....#.", "....#....", "..#####.."),
+    "notif" to listOf("....#....", "...###...", "..#####..", "..#####..", "..#####..", ".#######.", "#########", "...###...", "........."),
+    "overlay" to listOf("######...", "#....#...", "#....#...", "#..######", "#..#....#", "######..#", "...#....#", "...#....#", "...######"),
+    "access" to listOf("#........", "##.......", "###......", "####.....", "#####....", "######...", "##.##....", "#..##....", "....##..."),
+    "voice" to listOf("....#....", "....#.#..", "..#.#.#..", "#.#.#.#.#", "#.#.#.#.#", "#.#.#.#.#", "..#.#.#..", "....#.#..", "....#...."),
+    "ready" to listOf(".........", "........#", ".......##", "#.....##.", "##...##..", ".##.##...", "..###....", "...#.....", ".........")
+)

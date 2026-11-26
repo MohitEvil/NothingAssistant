@@ -115,7 +115,7 @@ class ScreenAgent(
             val q = prompt + "\nReply with ONE JSON object only: {\"do\":\"tap|input_text|scroll|back|open_app|done\",\"arg\":\"label, text, up/down, app name or summary\"}. Use done when finished or only a payment is left."
             val sys = "You operate an Android phone by reading its screen, one atomic action at a time. A screenshot of the screen may be attached: use it together with the UI list. HIST lists what you already did; LAST_ACTION_FAILED means try something different."
             val img = if (vision()) NothingAccess.instance?.let { runCatching { com.demon.nothingassistant.access.Ocr.screenJpeg(it, 900) }.getOrNull() } else null
-            val reply = (if (img != null) b.ask(emptyList(), q, sys, img).getOrNull() else null) ?: b.ask(emptyList(), q, sys).getOrNull() ?: return null
+            val reply = (if (img != null) b.ask(emptyList(), q, sys, img, fast = true).getOrNull() else null) ?: b.ask(emptyList(), q, sys, fast = true).getOrNull() ?: return null
             val o = runCatching { JSONObject(reply.substringAfter('{').let { "{" + it.substringBeforeLast('}') + "}" }) }.getOrNull() ?: return null
             val n = when (val d = o.optString("do").lowercase()) { "type", "input", "input_text" -> "input_text"; "open", "open_app" -> "open_app"; else -> d }
             return Act(n, o.optString("arg").trim(), o.optString("arg"))

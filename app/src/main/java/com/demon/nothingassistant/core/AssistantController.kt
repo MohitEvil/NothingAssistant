@@ -567,7 +567,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
         suspend fun cloudPlan(): Command? {
             if (!aiOn) return null
             transition(AssistantState.THINKING, "Thinking…", text)
-            val c = runCatching { planner.cloud(text, history.recent()) }.getOrNull()?.takeIf { com.demon.nothingassistant.agent.PlanGuard.ok(text, it.command) }
+            // Wait at most 9 seconds for the cloud plan; a slow answer is worse than the instant on-phone plan.
+            val c = runCatching { kotlinx.coroutines.withTimeoutOrNull(9_000L) { planner.cloud(text, history.recent()) } }.getOrNull()?.takeIf { com.demon.nothingassistant.agent.PlanGuard.ok(text, it.command) }
             if (c != null) { AppLog.d("route", "cloud"); pendingLearn = text to c.raw; return c.command }
             return null
         }

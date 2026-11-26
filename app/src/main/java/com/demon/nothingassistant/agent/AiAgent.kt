@@ -41,14 +41,15 @@ class AiAgent(
         val seen = HashSet<String>()
         val ordered = Targeting.reading(svc.candidates())
         for (c in ordered) {
-            val label = c.label.trim().replace(Regex("\\s+"), " ").take(60)
+            val isPw = runCatching { c.node.isPassword }.getOrDefault(false)
+            val label = (if (isPw) "(password field)" else c.label).trim().replace(Regex("\\s+"), " ").take(50)
             val kind = when { c.editable -> "field"; c.checkable -> "switch"; c.clickable -> "button"; else -> "text" }
             if (kind == "text" && label.length < 2) continue
             if (label.isEmpty() && kind == "text") continue
             if (!seen.add(kind + "|" + label.lowercase() + "|" + c.hit.centerY() / 6)) continue
             val on = if (c.checkable) runCatching { c.node.isChecked }.getOrNull() else null
             list.add(El(list.size + 1, kind, label, c.hit.centerX(), c.hit.centerY(), c, on))
-            if (list.size >= 90) break
+            if (list.size >= 70) break
         }
         // Games, web pages and custom views draw their own text: add what the screenshot reader finds.
         if (list.count { it.label.isNotEmpty() } < 7) {
@@ -76,7 +77,9 @@ class AiAgent(
         "You are the agent inside a voice assistant on an Android phone (Nothing OS, India). You complete the user's goal by operating the phone one step at a time. " +
             "Each turn you get GOAL, HISTORY (what you did and what happened) and the current SCREEN as a numbered list of elements, and usually a screenshot. " +
             "Think about where the thing the user wants lives, then choose ONE action. Reply with ONLY a JSON object: " +
-            "{\"thought\":\"short reasoning\",\"action\":\"...\", ...arguments}.\n" +
+            "{\"thought\":\"one short line\",\"action\":\"...\", ...arguments}. Be quick: keep thought under 12 words. " +
+            "When the next moves do not depend on seeing the result of the previous one (for example open_app then tap a visible label, or type then submit), " +
+            "you may send up to 4 in one reply as {\"steps\":[{\"action\":...},{\"action\":...}]}; inside steps use tap {text} (the label), never ids, because the screen changes between them.\n" +
             "Actions:\n" +
             "tap {id} - tap element by number (best), or {x,y} for a spot, or {text} to tap by visible label\n" +
             "long_press {id} | {x,y}\n" +
@@ -146,14 +149,14 @@ class AiAgent(
             if (System.currentTimeMillis() - started > 240_000) return ActionResult.Failure("I worked on it for a while and stopped. " + recap(hist))
             val svc = NothingAccess.instance
             val now = look(svc)
-            val needLook = step == 1 || now.els.size < 5 || lastChangedNot || step % 4 == 0
-            val img = if (!noImage && needLook && vision() && svc != null) runCatching { Ocr.screenJpeg(svc, 900) }.getOrNull() else null
+            val needLook = step == 1 || now.els.size < 5 || lastChangedNot
+            val img = if (!noImage && needLook && vision() && svc != null) runCatching { Ocr.screenJpeg(svc, 720) }.getOrNull() else null
             val q = "GOAL: $goal\nHISTORY:\n" + (if (hist.isEmpty()) "(nothing yet)" else hist.takeLast(8).joinToString("\n")) + "\n\nSCREEN NOW:\n" + now.text
             var reply: String? = null
             var lastErr = ""
             for (attempt in 1..4) {
                 val useImg = if (attempt <= 2) img else null
-                val r = b.ask(emptyList(), q, system(), useImg, big = true)
+                val r = b.ask(emptyList(), q, system(), useImg, big = true, fast = true)
                 reply = r.getOrNull()
                 if (reply != null) break
                 lastErr = r.exceptionOrNull()?.message.orEmpty()
@@ -166,35 +169,44 @@ class AiAgent(
             if (reply == null) return ActionResult.Failure(friendlyAiError(lastErr) + " " + recap(hist))
             val o0 = parse(reply)
             if (o0 == null) { hist += "$step. (your reply was not valid JSON, answer with one JSON object)"; continue }
-            val o: JSONObject = o0
-            val action = o.optString("action")
-            AppLog.d("aiagent", "step $step: ${describe(o)}  // ${o.optString("thought").take(80)}")
+            val batch: List<JSONObject> = o0.optJSONArray("steps")?.let { arr ->
+                (0 until minOf(arr.length(), 4)).mapNotNull { arr.optJSONObject(it) }
+            }?.takeIf { it.isNotEmpty() } ?: listOf(o0)
 
-            val key = describe(o)
-            if (key == lastKey && now.sig == lastSig) sameCount++ else sameCount = 0
-            lastKey = key; lastSig = now.sig
-            if (sameCount >= 2) { hist += "$step. ${describe(o)} -> REPEATED with no change. Use a different approach (scroll, settings_search, another element, back)."; if (sameCount >= 4) return ActionResult.Failure("I got stuck and stopped. " + recap(hist)); continue }
+            for ((bi, o) in batch.withIndex()) {
+                val here = if (bi == 0) now else look(NothingAccess.instance)
+                val svcNow = NothingAccess.instance
+                val action = o.optString("action")
+                AppLog.d("aiagent", "step $step.${bi + 1}: ${describe(o)}  // ${o.optString("thought").take(80)}")
 
-            val el = if (action == "tap" || action == "long_press") o.opt("id")?.toString()?.toIntOrNull()?.let { id -> now.els.firstOrNull { it.id == id } } else null
-            progress(friendly(o, el))
+                val key = describe(o)
+                if (key == lastKey && here.sig == lastSig) sameCount++ else sameCount = 0
+                lastKey = key; lastSig = here.sig
+                if (sameCount >= 2) { hist += "$step. ${describe(o)} -> REPEATED with no change. Use a different approach (scroll, settings_search, another element, back)."; if (sameCount >= 4) return ActionResult.Failure("I got stuck and stopped. " + recap(hist)); break }
 
-            when (action) {
-                "done" -> return ActionResult.Success(o.optString("summary").ifBlank { "Done." })
-                "answer" -> return ActionResult.Success(o.optString("text").ifBlank { "I couldn't tell." })
-                "fail" -> return ActionResult.Failure(o.optString("reason").ifBlank { "I couldn't do that." })
+                val el = if (action == "tap" || action == "long_press") o.opt("id")?.toString()?.toIntOrNull()?.let { id -> here.els.firstOrNull { it.id == id } } else null
+                progress(friendly(o, el))
+
+                when (action) {
+                    "done" -> return ActionResult.Success(o.optString("summary").ifBlank { "Done." })
+                    "answer" -> return ActionResult.Success(o.optString("text").ifBlank { "I couldn't tell." })
+                    "fail" -> return ActionResult.Failure(o.optString("reason").ifBlank { "I couldn't do that." })
+                }
+                val out = perform(o, action, el, here, svcNow)
+                if (out.terminal != null) return out.terminal
+                // Let the screen settle (quick polling), then say what changed so the AI can judge.
+                delay(220)
+                var after = svcNow?.signature() ?: 0
+                var waited = 0
+                while (waited < 1100 && svcNow != null) { delay(120); waited += 120; val s2 = svcNow.signature(); if (s2 == after) break; after = s2 }
+                val title2 = svcNow?.topTitle().orEmpty()
+                val changed = svcNow != null && after != here.sig
+                lastChangedNot = svcNow != null && !changed
+                hist += "$step. ${describe(o)}${if (o.optString("thought").isNotBlank()) " (" + o.optString("thought").take(60) + ")" else ""} -> ${out.note}; " +
+                    (if (svcNow == null) "" else if (changed) "screen changed" + (if (title2 != here.title && title2.isNotBlank()) " to '$title2'" else "") else "screen did NOT change")
+                // A step that failed or changed nothing ends the batch: the AI must look again before going on.
+                if (out.note.contains("failed") || out.note.contains("no element") || out.note.contains("not found") || lastChangedNot) break
             }
-            val out = perform(o, action, el, now, svc)
-            if (out.terminal != null) return out.terminal
-            // Let the screen settle, then say what changed so the AI can judge.
-            delay(450)
-            var after = svc?.signature() ?: 0
-            var waited = 0
-            while (waited < 1400 && svc != null) { delay(250); waited += 250; val s2 = svc.signature(); if (s2 == after) break; after = s2 }
-            val title2 = svc?.topTitle().orEmpty()
-            val changed = svc != null && after != now.sig
-            lastChangedNot = svc != null && !changed
-            hist += "$step. ${describe(o)}${if (o.optString("thought").isNotBlank()) " (" + o.optString("thought").take(60) + ")" else ""} -> ${out.note}; " +
-                (if (svc == null) "" else if (changed) "screen changed" + (if (title2 != now.title && title2.isNotBlank()) " to '$title2'" else "") else "screen did NOT change")
         }
         return ActionResult.Success("I worked on it as far as I could. " + recap(hist))
     }

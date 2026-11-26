@@ -62,8 +62,8 @@ class Planner(private val context: Context, private val brain: Brain) {
             "Now: $now.\n${screenContext()}\nPhone state: ${com.demon.nothingassistant.action.Blackboard.header()}\nTools:\n" + Tools.promptList()
         val compact = com.demon.nothingassistant.ai.Summarizer.compactHistory(history)
         val img = if (vision() && screenish.containsMatchIn(text)) NothingAccess.instance?.let { runCatching { com.demon.nothingassistant.access.Ocr.screenJpeg(it) }.getOrNull() } else null
-        val reply = (if (img != null) brain.ask(compact, text, system, img).getOrNull() else null)
-            ?: brain.ask(compact, text, system).getOrNull() ?: return null
+        val reply = (if (img != null) brain.ask(compact, text, system, img, fast = true).getOrNull() else null)
+            ?: brain.ask(compact, text, system, fast = true).getOrNull() ?: return null
         val json = reply.substringAfter('{', "").let { if (it.isEmpty()) null else "{" + it.substringBeforeLast('}') + "}" } ?: return null
         val rawCalls = runCatching { JSONObject(json).optJSONArray("calls") }.getOrNull()
         val cmd = runCatching { Tools.toPlan(rawCalls) }.getOrNull() ?: return null

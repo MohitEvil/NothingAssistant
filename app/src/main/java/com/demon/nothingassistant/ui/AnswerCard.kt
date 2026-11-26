@@ -125,7 +125,8 @@ private fun shareText(ctx: Context, text: String) {
 private val SUGGESTIONS = listOf(
     "turn on the flashlight", "set a timer for 5 minutes", "what's the weather today", "text Mom saying on my way",
     "open the camera", "what can you do", "how much battery is left", "tell me a joke",
-    "play some music", "what's on my screen", "set an alarm for 7 am", "turn on do not disturb"
+    "play some music", "summarize this screen", "set an alarm for 7 am", "turn on do not disturb",
+    "explain what's on my screen", "help me reply to this message"
 )
 
 /** Four tappable examples that change through the day, so the idle screen teaches what the assistant can do. */

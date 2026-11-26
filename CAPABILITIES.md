@@ -264,3 +264,10 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Idle screen: greeting by time of day, four tappable example commands that change through the day, and a box to type a request.
 - New instant offline answers: unit conversion (length, weight, volume, temperature), dice, random number between two numbers, days until a date.
 - Crashes are written to the log before the app closes.
+
+## Round 14: faster planning, redesigned setup
+- Fast mode for the planner and the screen agent: Thinking is turned off for these calls, replies are capped short, and the wait is 14 s instead of 30 to 75 s, so a slow model no longer holds a request for a long time. The cloud plan is also abandoned in favour of the on-phone plan if the model does not answer.
+- The screen agent can send up to 4 safe steps in one reply (for example open an app, then tap a label, then type), so there are fewer AI round trips. It looks again after any step that fails or changes nothing.
+- The agent waits less after each tap (it polls the screen every 0.12 s), takes screenshots only when the screen is sparse or the last step changed nothing, and sends them smaller. Password fields are never read out to the AI (idea taken from the AndroidHarness assistant).
+- Setup redesigned: animated pixel-art picture for every step, segmented progress bar, fades between steps, ALLOWED / NOT YET / REQUIRED chips, and a summary of what is on at the end.
+- New idle suggestions: summarize this screen, explain what's on my screen, help me reply to this message.
