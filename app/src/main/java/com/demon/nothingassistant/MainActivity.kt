@@ -39,6 +39,7 @@ import com.demon.nothingassistant.ui.withAccent
 import com.demon.nothingassistant.ui.LocalUiStyle
 import com.demon.nothingassistant.ui.UiStyle
 import com.demon.nothingassistant.ui.LogScreen
+import com.demon.nothingassistant.ui.MemoryScreen
 import com.demon.nothingassistant.ui.PersonaScreen
 import com.demon.nothingassistant.ui.VoiceScreen
 import com.demon.nothingassistant.ui.SettingsScreen

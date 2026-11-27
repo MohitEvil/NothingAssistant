@@ -252,12 +252,10 @@ object Mem {
     private val rememberRe = Regex("^(?:please )?(?:remember|note|save|yaad rakh(?:o|na)?|yaad rakho)(?: that| ki)? (.{3,})$", RegexOption.IGNORE_CASE)
     private val forgetRe = Regex("^(?:please )?(?:forget|delete|remove|bhool ja(?:o|na)?) (?:that |about |what i said about )?(.{3,})$", RegexOption.IGNORE_CASE)
     private val listRe = Regex("^(?:what do you (?:remember|know) about me|what have you learned about me|tell me what you remember)\\??$", RegexOption.IGNORE_CASE)
-    private val wipeRe = Regex("^(?:forget everything(?: about me)?|clear (?:my )?memory|erase (?:my )?memory)$", RegexOption.IGNORE_CASE)
 
     /** "remember that…", "forget…", "what do you know about me". Returns the spoken answer, or null if it isn't a memory command. */
     fun command(raw: String): String? {
         val t = raw.trim().trimEnd('.', '!')
-        if (wipeRe.matches(t)) { val n = total(); clear(); return if (n == 0) "I wasn't keeping anything about you." else "Done. I've forgotten everything." }
         if (listRe.matches(t)) {
             val l = files["profile"]?.lines?.take(6).orEmpty()
             return if (l.isEmpty()) "Not much yet. The more we talk, the more I'll know." else "Here's what I know. " + l.joinToString(" ") { it.removePrefix("- ").trimEnd('.') + "." }

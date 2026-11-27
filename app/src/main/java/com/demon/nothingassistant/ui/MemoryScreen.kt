@@ -117,10 +117,6 @@ fun MemoryScreen(settings: Settings, palette: GlyphPalette, open: String?, onOpe
                 Text("${f.count} notes · Updated ${fmt.format(Date(f.updated))}", color = palette.muted, fontSize = 12.sp)
             }
         }
-        if (files.isNotEmpty()) {
-            Spacer(Modifier.height(28.dp))
-            PillButton("FORGET EVERYTHING", filled = false, palette = palette, onClick = { Mem.clear(); tick++ }, modifier = Modifier.fillMaxWidth())
-        }
         Spacer(Modifier.height(32.dp))
     }
 }
