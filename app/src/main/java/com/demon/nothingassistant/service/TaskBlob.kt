@@ -37,7 +37,8 @@ object TaskBlob {
 
     /** Wired by the controller. */
     @Volatile var onStop: () -> Unit = {}
-    @Volatile var onChange: () -> Unit = {}
+    /** Press and hold: the user wants to say something about the running task (drop it, change it, or nothing). */
+    @Volatile var onHold: () -> Unit = {}
 
     val showing: Boolean get() = view != null
 
@@ -109,7 +110,6 @@ object TaskBlob {
     private class BlobView(ctx: Context, val d: Float) : View(ctx) {
         var label = ""
         private var running = false
-        private var expanded = false
         private var downAt = 0L
         private var sx = 0f; private var sy = 0f; private var startX = 0; private var startY = 0
         private var moved = false
@@ -119,43 +119,16 @@ object TaskBlob {
         private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         private val red = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE5232B.toInt() }
         private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 11f * d; typeface = android.graphics.Typeface.MONOSPACE; textAlign = Paint.Align.CENTER; letterSpacing = 0.12f }
-        private val collapse = Runnable { setExpanded(false) }
         private val holdCheck = Runnable {
-            if (!moved) { long = true; performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); setExpanded(true) }
+            if (!moved) { long = true; performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); onHold() }
         }
         private val tick = object : Runnable { override fun run() { if (running) { invalidate(); main.postDelayed(this, 40) } } }
 
         fun begin() { running = true; main.post(tick) }
-        fun end() { running = false; main.removeCallbacks(tick); main.removeCallbacks(collapse); main.removeCallbacks(holdCheck) }
-
-        private fun setExpanded(on: Boolean) {
-            expanded = on
-            main.removeCallbacks(collapse)
-            val p = lp ?: return
-            val w = (if (on) 232 else 64) * d
-            if (on) {
-                // Grow towards the middle of the screen so it never leaves the display.
-                val sw = resources.displayMetrics.widthPixels
-                if (p.x + w > sw - 8 * d) p.x = (sw - w - 8 * d).toInt().coerceAtLeast(0)
-            }
-            p.width = w.toInt()
-            runCatching { wm?.updateViewLayout(this, p) }
-            if (on) main.postDelayed(collapse, 5000)
-            invalidate()
-        }
+        fun end() { running = false; main.removeCallbacks(tick); main.removeCallbacks(holdCheck) }
 
         override fun onDraw(c: Canvas) {
             val t = SystemClock.uptimeMillis()
-            if (expanded) {
-                val r = RectF(1f * d, 1f * d, width - 1f * d, height - 1f * d)
-                c.drawRoundRect(r, height / 2f, height / 2f, fill)
-                c.drawRoundRect(r, height / 2f, height / 2f, rim)
-                val half = width / 2f
-                c.drawText("✕  DROP", half / 2f + 4 * d, height / 2f + 4 * d, txt)
-                c.drawLine(half, 14 * d, half, height - 14 * d, rim)
-                c.drawText("✎  CHANGE", half + half / 2f - 2 * d, height / 2f + 4 * d, txt)
-                return
-            }
             val cx = width / 2f; val cy = height / 2f; val r = width / 2f - 2 * d
             val pulse = 0.5f + 0.5f * sin(t / 420.0).toFloat()
             c.drawCircle(cx, cy, r, fill)
@@ -186,7 +159,7 @@ object TaskBlob {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - sx; val dy = e.rawY - sy
                     if (abs(dx) > 14 * d || abs(dy) > 14 * d) { moved = true; main.removeCallbacks(holdCheck) }
-                    if (moved && !expanded) {
+                    if (moved) {
                         p.x = (startX + dx).toInt().coerceIn(0, m.widthPixels - width)
                         p.y = (startY + dy).toInt().coerceIn(0, m.heightPixels - height)
                         runCatching { wm?.updateViewLayout(this, p) }
@@ -194,13 +167,7 @@ object TaskBlob {
                 }
                 MotionEvent.ACTION_UP -> {
                     main.removeCallbacks(holdCheck)
-                    if (!moved && !long) {
-                        if (expanded) {
-                            val left = e.x < width / 2f
-                            setExpanded(false)
-                            if (left) onStop() else onChange()
-                        } else onStop()
-                    }
+                    if (!moved && !long) onStop()
                 }
                 MotionEvent.ACTION_CANCEL -> main.removeCallbacks(holdCheck)
             }

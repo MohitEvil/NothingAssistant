@@ -64,27 +64,19 @@ fun MemoryScreen(settings: Settings, palette: GlyphPalette, open: String?, onOpe
             Spacer(Modifier.height(4.dp))
             Text("${current.count} notes · updated ${fmt.format(Date(current.updated))}", color = palette.muted, fontSize = 12.sp)
             Spacer(Modifier.height(16.dp))
-            var text by remember(current.path) { mutableStateOf(current.body) }
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it; Mem.setBody(current.path, it) },
-                minLines = 8,
-                textStyle = TextStyle(color = palette.fg, fontSize = 14.sp, lineHeight = 21.sp),
-                cursorBrush = SolidColor(palette.red),
-                modifier = Modifier.fillMaxWidth().background(palette.card, RoundedCornerShape(18.dp)).border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(18.dp)).padding(16.dp)
-            )
-            Spacer(Modifier.height(16.dp))
-            PillButton("DELETE THIS FILE", filled = false, palette = palette, onClick = { Mem.delete(current.path); onOpen(null) }, modifier = Modifier.fillMaxWidth())
+            Column(
+                Modifier.fillMaxWidth().background(palette.card, RoundedCornerShape(18.dp)).border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(18.dp)).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                current.lines.forEach { Text(it.removePrefix("- "), color = palette.fg, fontSize = 14.sp, lineHeight = 21.sp) }
+            }
             Spacer(Modifier.height(32.dp))
             return@Column
         }
 
         DotText("MEMORY", palette.fg, palette.dim.copy(alpha = 0.45f), 5.dp)
         Spacer(Modifier.height(12.dp))
-        Text(
-            "Everything I've learned about you and about how things work on this phone, kept as files. I decide what is worth keeping while we talk, and the System files make repeat jobs faster. It all stays on this phone.",
-            color = palette.muted, fontSize = 13.sp
-        )
+        Text("What I've saved so far. It stays on this phone.", color = palette.muted, fontSize = 13.sp)
         Spacer(Modifier.height(16.dp))
         Card(palette) {
             ToggleRow("Learn automatically", "Keep notes as we talk and as I use your phone", settings.memoryOn, palette) { settings.setMemoryOn(it); tick++ }

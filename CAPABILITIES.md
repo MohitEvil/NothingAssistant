@@ -279,8 +279,14 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **New icons**: stroke icons from the Lucide family (same as AndroidHarness) replace the dot icons. They draw themselves on stroke by stroke, and the welcome icons breathe and glow. Each setting and page has its own icon.
 
 ## Round 16 — Memory files, task blob, synonyms, honest switches
-- **Memory files** (AI settings → Memory files): memory kept as readable files — Profile, Topics, Areas, and System (settings map, apps, commands that worked). The AI decides what is worth keeping after chats (batched, throttled, silent: nothing is announced), and also corrects notes that became wrong. System files are filled by doing: how a setting was really changed (switch, menu, own page), which apps you open, which commands worked. Relevant system notes are sent to the screen agent so repeat jobs go straight to the right place. Open, edit or delete any file; switch learning off.
-- **Task blob**: a small dot blob stays on screen the whole time a task runs. Tap = stop now (nothing reopens). Hold = DROP or CHANGE (stop and listen for the new instruction). Drag it anywhere. It is an accessibility overlay of our own app, so screen reading ignores it; it hides for the instant of a screenshot/OCR, and steps aside when a tap is about to land under it.
+- **Memory files** (AI settings → Memory files): a read-only view of what the assistant has saved. The AI decides what to keep, silently. Stays on the phone.
+- **Task blob**: a small dot blob stays on screen the whole time a task runs. Tap = stop now (nothing reopens). Hold = it pauses and listens. Drag it anywhere. It is an accessibility overlay of our own app, so screen reading ignores it; it hides for the instant of a screenshot/OCR, and steps aside when a tap is about to land under it.
 - **Synonyms (no AI)**: ~50 groups (dark mode/theme, screen/display timeout, auto-rotate/rotation, hotspot/tethering, airplane/flight mode, DND/silent, brightness, refresh rate…) used by every label search and by fuzzy scoring.
 - **Honest switches**: finds what the control really is — a switch in the row, a row that opens a page with the switch, or a row that opens a list with On/Off — acts on that, re-reads the state, retries with a real tap on the switch, and reports failure instead of "done" when it didn't change. The screen agent now sees each switch named after its row.
 - **Faster looks**: screen reads are shared for a tenth of a second during polling and refreshed after every action.
+
+## Round 17 — Blob, "no" means try again, listening only when it matters
+- **Blob**: tap stops the job. Hold pauses it and listens: say "forget it", "drop it" or "don't do this" to end it, "do this instead …" to replace it, or stay silent and it carries on.
+- **Saying "no" to "did you mean…?"** now tries another way: the rejected item is skipped, the search goes deeper, and the screen agent is asked to find the right one. A wrong contact guess asks who you meant.
+- **Smart listening**: after finished one-shot jobs (switches, volume, timers, calls, playback…) the mic stays closed; it reopens when I asked a question, after a step that usually has a next one (an app just opened), and after answers that invite a reply. Quick facts don't reopen it.
+- Memory is read-only in the app.

@@ -278,19 +278,36 @@ class AssistantController(private val context: Context, val settings: Settings) 
         }
     }
 
-    /** Held the blob and chose CHANGE: stop, then listen for the new instruction. */
-    fun changeTask() {
+    /** The task being held while the user says something about it. Silence puts it back; "forget it" drops it; anything else replaces it. */
+    @Volatile private var heldTask: String? = null
+
+    /** Pressed and held the blob: pause the job and listen. Saying nothing carries on; saying "forget it", "drop it" or "don't do this" ends it; saying something else does that instead. */
+    fun holdTask() {
         scope.launch {
-            interruptTask()
-            kotlinx.coroutines.delay(250)
+            val t = _ui.value.transcript
+            if (t.isBlank()) { interruptTask(); return@launch }
+            heldTask = t
+            flow++
+            workJob?.cancel()
+            speakJob?.cancel()
+            voice.stop()
+            com.demon.nothingassistant.service.TaskBlob.hide()
+            haptics.lightTap()
+            kotlinx.coroutines.delay(200)
             if (!MainActivity.resumed && !PanelActivity.visible) {
-                com.demon.nothingassistant.service.WindowAnchor.hold(context, 20_000L)
+                com.demon.nothingassistant.service.WindowAnchor.hold(context, 30_000L)
                 PanelActivity.show(context)
                 var waited = 0
                 while (!PanelActivity.visible && waited < 2200) { kotlinx.coroutines.delay(40); waited += 40 }
             }
             beginListening(Mode.COMMAND)
         }
+    }
+
+    private fun resumeHeld() {
+        val t = heldTask ?: return
+        heldTask = null
+        runCommand(t)
     }
 
     fun cancel() {
@@ -364,9 +381,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
     init {
         speech.extraLanguages = { secondLangs() }
         com.demon.nothingassistant.service.TaskBlob.onStop = { interruptTask() }
-        com.demon.nothingassistant.service.TaskBlob.onChange = { changeTask() }
+        com.demon.nothingassistant.service.TaskBlob.onHold = { holdTask() }
         com.demon.nothingassistant.ai.Mem.init(context)
         com.demon.nothingassistant.ai.Mem.on = { settings.memoryOn }
+        com.demon.nothingassistant.ai.Mem.seed(context, settings.userName, settings.language)
         speech.whisperConfig = {
             val k = settings.whisperKey()
             if (!settings.whisperOn || k.isBlank()) null
@@ -417,6 +435,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     private fun noMatch() {
+        if (heldTask != null && retried) { resumeHeld(); return }
         if (!retried) {
             retried = true
             // Bilingual: the second try listens in the other language.
@@ -458,6 +477,20 @@ class AssistantController(private val context: Context, val settings: Settings) 
     // ---- Understanding and doing ----
 
     private fun process(raw: String) {
+        listenCmd = null
+        if (settings.memoryOn) { com.demon.nothingassistant.ai.Mem.seed(context, settings.userName, settings.language); com.demon.nothingassistant.ai.Mem.observe(raw, java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)) }
+        com.demon.nothingassistant.action.SmartUi.rejected.clear()
+        heldTask?.let { held ->
+            heldTask = null
+            val t = raw.trim().trimEnd('.', '!', '?')
+            val drop = Regex("^(?:(?:ok(?:ay)?|no|nah|hey|please)[ ,]+)*(?:forget (?:it|that|about it)|drop (?:it|that)|never ?mind|leave it|cancel(?: it| that| this)?|stop(?: it| that| this)?|don'?t (?:do )?(?:this|that|it)|do not (?:do )?(?:this|that|it)|that'?s wrong|not that|ignore (?:it|that))$", RegexOption.IGNORE_CASE)
+            if (drop.matches(t)) { closeConversation(); return }
+            // "do this instead: …", "actually …", "no, …": the new instruction replaces the old one.
+            val instead = Regex("^(?:(?:no|nope|wait|actually|rather|instead|do this instead|do that instead)[ ,:]+)+(.{3,})$", RegexOption.IGNORE_CASE).find(t)?.groupValues?.get(1)
+            val dontThen = Regex("^(?:don'?t|do not) .{2,40}?[,;]\\s*(.{3,})$", RegexOption.IGNORE_CASE).find(t)?.groupValues?.get(1)
+            process(instead ?: dontThen ?: raw)
+            return
+        }
         lastAnswer.value = null
         liveAdd(true, raw)
         liveFails = 0
@@ -675,6 +708,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 history.addPair(text, result.message.ifBlank { "Done." }, "action")
                 if (settings.memoryOn) {
                     if (cmd is Command.OpenApp) com.demon.nothingassistant.ai.Mem.noteApp(cmd.name)
+                    scope.launch { runCatching { com.demon.nothingassistant.ai.Mem.learn(brain, text, result.message) } }
                     // Remember how a screen-driven job went, so the AI can go straight to it next time.
                     if (cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.UiSwitch || cmd is Command.OpenSetting || cmd is Command.Task)
                         com.demon.nothingassistant.ai.Mem.learnHow("commands", "\"${text.take(70)}\" worked: ${cmd.describe().take(80)}")
@@ -683,6 +717,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 pendingLearn?.let { (t, raw) -> if (t == text) com.demon.nothingassistant.agent.Skills.learn(t, raw) }
                 replayPattern?.let { com.demon.nothingassistant.agent.Skills.succeeded(it) }
                 pendingLearn = null; replayPattern = null
+                listenCmd = cmd
                 if (startsPlayback(cmd)) { playAndClose(launch); return }
                 if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
                 else successLaunching(result.message, text, launch)
@@ -846,6 +881,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun respond(text: String, rawReply: String) {
         val reply = com.demon.nothingassistant.ai.TextClean.decode(rawReply)
         val token = ++flow
+        lastQ = text; lastReply = reply
         lastAnswer.value = LastAnswer(text, reply)
         transition(AssistantState.SPEAKING, "", text, reply = reply)
         haptics.veryLightTap()
@@ -854,7 +890,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private fun afterReply() {
         lastActive = SystemClock.uptimeMillis()
-        if ((settings.followUp || settings.stayOpen || liveOn.value) && hasMicPermission()) {
+        if ((((settings.followUp || settings.stayOpen) && replyInvitesMore()) || liveOn.value) && hasMicPermission()) {
             speakJob = scope.launch {
                 delay(120)
                 beginListening(Mode.FOLLOWUP)
@@ -926,6 +962,28 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     private fun decline(pending: PendingConfirm) {
+        val c = pending.command
+        val text = _ui.value.transcript
+        // "No": that guess was wrong, not the whole job. Look for another way instead of giving up.
+        val rejected = when (c) { is Command.UiSwitch -> c.label; is Command.UiSmart -> if (c.approved) null else c.target; is Command.UiTap -> c.label; else -> null }
+        if (rejected != null && rejected.isNotBlank() && text.isNotBlank() && !pending.declineMessage.contains("didn't tap")) {
+            com.demon.nothingassistant.action.SmartUi.rejected.add(rejected.trim().lowercase())
+            flow++
+            haptics.lightTap()
+            val retry: Command = if (brain.configured()) Command.Task("$text (the user said it is NOT “$rejected”: find the right one another way)")
+            else IntentEngine.parse(text).takeIf { it !is Command.Unknown && it !is Command.Question } ?: Command.Task(text)
+            workJob?.cancel()
+            workJob = scope.launch { execute(retry, text) }
+            return
+        }
+        // A wrong guess at a contact: ask who they meant.
+        if (c is Command.SendSms || c is Command.Call) {
+            awaitingApp = if (c is Command.SendSms) { n: String -> Command.SendSms(n, c.body) } else { n: String -> Command.Call(n) }
+            val token = ++flow
+            transition(AssistantState.SPEAKING, "", text, reply = "Okay, who did you mean?")
+            say("Okay, who did you mean?") { if (token == flow) listenForMore() }
+            return
+        }
         if (pending.declineAsFailure) {
             fail(pending.declineMessage)
         } else {
@@ -958,16 +1016,56 @@ class AssistantController(private val context: Context, val settings: Settings) 
         transition(AssistantState.IDLE, "", "")
     }
 
+    // ---- When to listen again ----
+
+    @Volatile private var listenCmd: Command? = null
+    private var lastQ = ""
+    private var lastReply = ""
+
+    /** Jobs that are finished once done: nothing more to say about them, so the mic stays closed. */
+    private fun isTerminal(c: Command): Boolean = when (c) {
+        is Command.Chain -> c.steps.lastOrNull()?.let { isTerminal(it) } ?: false
+        is Command.Flashlight, is Command.SetTimer, is Command.SetAlarm, is Command.Volume, is Command.Media, is Command.Brightness,
+        is Command.Rotation, is Command.ScreenTimeout, is Command.Dnd, is Command.Ringer, is Command.LockScreen, is Command.KeepAwake,
+        is Command.Toggle, is Command.SetValue, is Command.TimeNow, is Command.DateToday, is Command.Camera, is Command.TakePhoto,
+        is Command.CopyText, is Command.SetDefaultAssistant, is Command.Reminder, is Command.AddEvent, is Command.InstallApp,
+        is Command.UpdateApp, is Command.Call, is Command.ComposeSms, is Command.Navigate, is Command.UiSend, is Command.PlayMusic,
+        is Command.PlayIn, is Command.UiPlayRandom, is Command.DeleteScreenshot, is Command.GlobalAction, is Command.SharePhoto,
+        is Command.Wallpaper, is Command.Email, is Command.OpenUrl, is Command.UiSwitch -> true
+        else -> false
+    }
+
+    /** After a finished task: listen again only when it needs an answer, or when something more is likely to follow (a step in a chain, an app just opened). */
+    private fun smartListen(message: String): Boolean {
+        val c = listenCmd
+        listenCmd = null
+        if (message.trim().endsWith("?") || Regex("\\b(which one|what should|who did you mean|say confirm|tell me which)\\b", RegexOption.IGNORE_CASE).containsMatchIn(message)) return true
+        return !(c != null && isTerminal(c))
+    }
+
+    /** After an answer: keep listening for a question back, a long explanation, or a conversation already under way; not for a quick fact. */
+    private fun replyInvitesMore(): Boolean {
+        val r = lastReply.trim()
+        if (r.endsWith("?") || r.endsWith("؟")) return true
+        val closed = Regex("^(?:what(?:'s| is) the (?:time|date|day)|what time|what day|how much is|how many|calculate|convert|what(?:'s| is) \\d|battery|how(?:'s| is) the weather|who (?:is|was|wrote|invented)|when (?:is|was|did)|where (?:is|was)|what(?:'s| is) the capital)", RegexOption.IGNORE_CASE)
+        val words = r.split(Regex("\\s+")).size
+        if (closed.containsMatchIn(lastQ.trim()) && words <= 30 && !inSession) return false
+        if (Regex("\\b(should i|what do you think|help me|explain|why|how do i|how can i|suggest|recommend|advice|tell me about|story|any ideas|options)\\b", RegexOption.IGNORE_CASE).containsMatchIn(lastQ)) return true
+        if (inSession) return true
+        return words >= 18 || lastQ.trim().split(Regex("\\s+")).size >= 8
+    }
+
     private fun success(message: String, transcript: String, askMore: Boolean = false) {
         val token = ++flow
         transition(AssistantState.SUCCESS, message, transcript)
         haptics.success()
-        if ((settings.stayOpen || liveOn.value) && hasMicPermission()) {
+        val again = smartListen(message)
+        if ((settings.stayOpen || liveOn.value) && hasMicPermission() && (again || liveOn.value)) {
             // Say what was done, then keep the window open and wait for the next task.
             say(message) { if (token == flow) continueSession() }
             return
         }
-        if (askMore && settings.followUp && settings.speakReplies && voice.available && hasMicPermission()) {
+        if (again && askMore && settings.followUp && settings.speakReplies && voice.available && hasMicPermission()) {
             // Say what was done, then ask if there is anything else, then listen.
             voice.speak(message) {
                 if (token != flow) return@speak
@@ -988,7 +1086,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         transition(AssistantState.SUCCESS, message, transcript)
         haptics.success()
         val fired = java.util.concurrent.atomic.AtomicBoolean(false)
-        val keepOpen = settings.stayOpen && hasMicPermission()
+        val keepOpen = settings.stayOpen && hasMicPermission() && smartListen(message)
         val token = flow
         val go = {
             if (fired.compareAndSet(false, true)) {

@@ -63,12 +63,12 @@ object Mem {
 
     // ---- Reading ----
 
-    private fun order(p: String) = when { p == "profile" -> 0; p.startsWith("topics/") -> 1; p.startsWith("areas/") -> 2; else -> 3 }
+    private fun order(p: String) = when { p == "profile" -> 0; p.startsWith("topics/") -> 1; p.startsWith("areas/") -> 2; p.startsWith("people/") -> 3; else -> 4 }
     @Synchronized fun list(): List<MFile> = files.values.sortedWith(compareBy({ order(it.path) }, { it.path }))
     @Synchronized fun get(path: String): MFile? = files[path]
     @Synchronized fun total(): Int = files.values.sumOf { it.count }
     fun title(path: String) = if (path == "profile") "Profile" else path.substringAfter('/').replace('-', ' ').replace('_', ' ').replaceFirstChar { it.uppercase() }
-    fun group(path: String) = when (order(path)) { 0 -> "You"; 1 -> "Topics"; 2 -> "Areas"; else -> "System" }
+    fun group(path: String) = when (order(path)) { 0 -> "You"; 1 -> "Topics"; 2 -> "Areas"; 3 -> "People"; else -> "System" }
 
     private fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length > 2 }.toSet()
     private fun similar(a: String, b: String): Boolean {
@@ -105,6 +105,7 @@ object Mem {
             t.startsWith("system/") -> if (t in SYSTEM_DESC) t else "system/commands"
             t.startsWith("topics/") -> "topics/" + slug(t.substringAfter('/')).ifBlank { "general" }
             t.startsWith("areas/") -> "areas/" + slug(t.substringAfter('/')).ifBlank { "general" }
+            t.startsWith("people/") -> "people/" + slug(t.substringAfter('/')).ifBlank { "someone" }
             else -> "topics/" + slug(t).ifBlank { "general" }
         }
     }
@@ -113,6 +114,7 @@ object Mem {
         0 -> "Who the user is: identity, work, tastes, routines and how they like to be spoken to."
         1 -> "What the user knows or cares about in this subject."
         2 -> "An ongoing part of the user's life."
+        3 -> "Someone in the user's life and how they relate."
         else -> ""
     }
 
@@ -136,6 +138,66 @@ object Mem {
         files.values.removeAll { it.body.isBlank() && !it.path.startsWith("system/") }
         if (n > 0) save()
         return n
+    }
+
+    /** Sets one keyed line ("Name: Demon") in a file, replacing the earlier value of the same key. */
+    @Synchronized fun upsert(path: String, key: String, value: String, desc: String = "") {
+        val f = files.getOrPut(path) { MFile(path, desc.ifBlank { defaultDesc(path) }, "", System.currentTimeMillis()) }
+        val line = "- $key: $value"
+        val ls = f.lines.toMutableList()
+        val i = ls.indexOfFirst { it.startsWith("- $key:") }
+        if (i >= 0) { if (ls[i] == line) return; ls[i] = line } else ls.add(0, line)
+        f.body = ls.joinToString("\n"); f.updated = System.currentTimeMillis(); save()
+    }
+
+    /** What the phone itself says about the user: the name given at setup, where the phone is set, the language they speak to it in. */
+    fun seed(ctx: Context, name: String, speechTag: String) {
+        if (!on()) return
+        if (name.isNotBlank()) upsert("profile", "Name", name.trim())
+        val loc = java.util.Locale.getDefault()
+        val region = loc.displayCountry.ifBlank { null }
+        if (region != null) upsert("profile", "Phone region", region)
+        upsert("profile", "Time zone", java.util.TimeZone.getDefault().id)
+        val spoken = java.util.Locale.forLanguageTag(speechTag)
+        upsert("profile", "Speaks to the assistant in", spoken.displayName.ifBlank { speechTag })
+        if (spoken.country.isNotBlank()) upsert("profile", "Accent / variety of speech", spoken.displayName)
+    }
+
+    private val hindiWords = setOf("kya", "hai", "hain", "karo", "kar", "karna", "mujhe", "mera", "meri", "mere", "batao", "bata", "nahi", "nahin", "haan", "bhai", "yaar", "kaise", "kyun", "kab", "kaun", "abhi", "chalo", "dikhao", "lagao", "band", "khol", "bhejo", "dena", "de", "do", "wala", "wali", "aur", "mat", "thoda", "bohot", "bahut", "acha", "accha", "theek", "sunao", "chala", "bol", "bolo", "ko", "ka", "ki", "se", "pe", "mein")
+    private val politeWords = Regex("\\b(please|thanks|thank you|thankyou|kindly|shukriya|dhanyavaad|dhanyavad|sorry|could you|would you)\\b", RegexOption.IGNORE_CASE)
+
+    /** Counts how the user talks and when, with no AI call, and turns the counts into a few plain lines every so often. */
+    fun observe(text: String, hour: Int) {
+        if (!on()) return
+        val p = sp ?: return
+        val words = text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.isEmpty()) return
+        val e = p.edit()
+        fun inc(k: String, by: Int = 1) { e.putInt(k, p.getInt(k, 0) + by) }
+        inc("o_n"); inc("o_words", words.size)
+        if (text.any { it in '\u0900'..'\u097F' }) inc("o_deva")
+        else if (words.count { it.lowercase().trim(',', '.', '?', '!') in hindiWords } >= 2) inc("o_hinglish") else inc("o_english")
+        if (politeWords.containsMatchIn(text)) inc("o_polite")
+        if (text.trim().endsWith("?") || Regex("^(what|who|when|where|why|how|kya|kaise|kyun|kab|kaun)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text.trim())) inc("o_q") else inc("o_cmd")
+        inc(when (hour) { in 5..11 -> "o_morning"; in 12..16 -> "o_afternoon"; in 17..21 -> "o_evening"; else -> "o_night" })
+        e.apply()
+        val n = p.getInt("o_n", 0)
+        if (n % 12 != 0) return
+        val deva = p.getInt("o_deva", 0); val hing = p.getInt("o_hinglish", 0); val eng = p.getInt("o_english", 0)
+        val tot = (deva + hing + eng).coerceAtLeast(1)
+        val lang = when {
+            deva * 100 / tot >= 40 -> "Speaks Hindi (Devanagari) most of the time"
+            (hing + deva) * 100 / tot >= 35 -> "Mixes Hindi and English (Hinglish), about ${(hing + deva) * 100 / tot}% of what they say"
+            else -> "Speaks mostly English"
+        }
+        upsert("topics/how-they-talk", "Language", lang, "How the user speaks: language mix, length, tone and politeness.")
+        val avg = p.getInt("o_words", 0).toDouble() / n
+        upsert("topics/how-they-talk", "Length", if (avg <= 4.5) "Short, direct commands (about ${avg.toInt()} words)" else if (avg <= 9) "Brief natural sentences" else "Full, detailed sentences")
+        upsert("topics/how-they-talk", "Tone", if (p.getInt("o_polite", 0) * 100 / n >= 15) "Polite with the assistant (please, thanks)" else "Direct and to the point, rarely adds please or thanks")
+        val q = p.getInt("o_q", 0); val c = p.getInt("o_cmd", 0)
+        upsert("topics/with-the-assistant", "Mostly", if (q > c) "Asks questions more than giving commands" else "Gives commands more than asking questions")
+        val slots = listOf("morning" to p.getInt("o_morning", 0), "afternoon" to p.getInt("o_afternoon", 0), "evening" to p.getInt("o_evening", 0), "night" to p.getInt("o_night", 0))
+        slots.maxByOrNull { it.second }?.let { if (it.second * 3 >= n) upsert("topics/with-the-assistant", "Usually active", it.first, "How and when the user uses the assistant.") }
     }
 
     // ---- Things the assistant learns by doing (no AI call) ----
@@ -176,8 +238,9 @@ object Mem {
         val rel = files.values.filter { !it.path.startsWith("system/") && it.path != "profile" }.flatMap { f -> f.lines.map { it to f.path } }
             .map { (l, p) -> Triple(l, p, words(l).intersect(q).size) }.filter { it.third > 0 }.sortedByDescending { it.third }
         for ((l, _, _) in rel) { if (sb.length + l.length > budget) break; sb.append(l.removePrefix("- ")).append("; ") }
+        listOf("topics/how-they-talk", "topics/with-the-assistant").forEach { p -> files[p]?.lines?.forEach { l -> if (sb.length + l.length < budget + 260) sb.append(l.removePrefix("- ")).append("; ") } }
         topApps().takeIf { it.isNotEmpty() }?.let { sb.append("They often open ").append(it.joinToString(", ")).append('.') }
-        return if (sb.length < 140) "" else sb.toString()
+        return if (sb.length < 120) "" else sb.toString()
     }
 
     /** For the screen-working AI: what has already been learned about this phone that bears on the task. */
@@ -223,15 +286,17 @@ object Mem {
             "PROFILE NOW:\n" + (files["profile"]?.body?.take(1400) ?: "(empty)") + "\nOTHER FILES: " + files.keys.filter { !it.startsWith("system/") && it != "profile" }.joinToString(", ").ifBlank { "(none)" }
         }
         val convo = turns.joinToString("\n") { "USER: ${it.first.take(300)}\nASSISTANT: ${it.second.take(200)}" }
-        val sys = "You keep a private memory file system about the user of a voice assistant, like a thoughtful personal assistant would. From the conversation, decide what is worth remembering for months: " +
-            "who they are, their name, family and people, where they live and work or study, goals and exams, interests, tastes, diet, habits and routines, devices, languages and how they like replies (short, Hindi, Hinglish, formal…). " +
-            "Skip small talk, one-off questions, commands, temporary moods, and anything already in the files. Keep lines short, third person, factual, e.g. 'Preparing for the CDS exam.' " +
-            "Output one operation per line, at most 6, nothing else:\n" +
-            "ADD profile | <fact>\nADD topics/<subject> | <fact>\nADD areas/<ongoing-thing> | <fact>\nDEL <file> | <words of an old note that is now wrong or contradicted>\n" +
-            "If nothing is worth keeping output exactly NONE."
+        val sys = "You keep a private, deep memory about the user of a voice assistant, the way a close, observant friend would, so that every answer can be shaped to them. " +
+            "From the conversation, decide what is worth remembering for months or years. Think wide: name, nicknames, age group, where they are from and live, languages and accent, work, study, exams and goals, skills, money habits they state, " +
+            "family, friends, partners, who they are close to and how they talk about each person, pets, what they love and hate, food and diet, music, shows, games, sports, hobbies, humour, values, opinions, fears, " +
+            "daily routine, sleep, health habits they state about themselves, devices and apps they rely on, how they like answers (short, detailed, Hindi, Hinglish, formal, jokes, blunt), pet peeves with the assistant, and how they behave and feel when talking to it. " +
+            "Also note corrections the user makes to the assistant. Skip small talk, one-off questions, commands, temporary moods, and anything already filed. Lines are short, third person, factual, e.g. 'Preparing for the CDS exam.' " +
+            "Output one operation per line, at most 8, nothing else:\n" +
+            "ADD profile | <fact about who they are>\nADD topics/<subject> | <fact: tastes, habits, opinions, style>\nADD areas/<ongoing-thing> | <fact>\nADD people/<first-name> | <relationship and what matters about them>\n" +
+            "DEL <file> | <words of an old note that is now wrong or contradicted>\nIf nothing is worth keeping output exactly NONE."
         val out = brain.ask(emptyList(), have + "\n\nCONVERSATION:\n" + convo, system = sys, fast = true).getOrNull()?.trim().orEmpty()
         if (out.isEmpty() || out.startsWith("NONE", true)) return
-        for (raw in out.lines().take(8)) {
+        for (raw in out.lines().take(10)) {
             val l = raw.trim().trimStart('-', '*', '•', ' ')
             val m = Regex("^(ADD|DEL)\\s+([^|]+)\\|\\s*(.+)$", RegexOption.IGNORE_CASE).find(l) ?: continue
             val path = m.groupValues[2].trim()

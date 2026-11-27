@@ -20,6 +20,10 @@ import kotlin.math.max
  * several match, understands "the second toggle", "the button in front of Telegram", "it", and remembers what it just saw.
  */
 class SmartUi(private val ui: UiControl, context: Context) {
+    companion object {
+        /** Labels the user just said "no" to (lower case). They are skipped when looking again, so the next try finds something else. */
+        val rejected = HashSet<String>()
+    }
     private val app = context.applicationContext
     private val dm get() = app.resources.displayMetrics
 
@@ -227,7 +231,7 @@ class SmartUi(private val ui: UiControl, context: Context) {
         }
 
         fun look(): Loc? {
-            val all = svc.candidates()
+            val all = svc.candidates().filter { it.label.trim().lowercase() !in rejected }
             if (name.isBlank()) {
                 var pool = when (kind) {
                     Targeting.Kind.SWITCH -> all.filter { it.checkable }
@@ -385,7 +389,7 @@ class SmartUi(private val ui: UiControl, context: Context) {
         var label = c.label.trim()
         if (label.lowercase() in pronouns) label = ScreenMemory.last()?.label.orEmpty()
         val all = svc.candidates()
-        val switches = all.filter { it.checkable }
+        val switches = all.filter { it.checkable }.filter { rowLabel(all, it).trim().lowercase() !in rejected }
         if (label.isBlank()) {
             return when {
                 switches.isEmpty() -> ActionResult.Failure("I can't see a switch on this screen.")
