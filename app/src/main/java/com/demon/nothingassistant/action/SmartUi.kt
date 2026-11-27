@@ -430,17 +430,74 @@ class SmartUi(private val ui: UiControl, context: Context) {
         }
     }
 
+    /**
+     * Turns something on or off, and only says so when it really happened. First finds what the control IS: a switch (or checkbox) in the row,
+     * a row that opens another page with the switch, or a row that opens a menu with On / Off choices. Then checks the state afterwards.
+     */
     private suspend fun toggleCand(svc: NothingAccess, c: NothingAccess.Cand, on: Boolean?, label: String): ActionResult {
         val name = label.ifBlank { "the switch" }
-        val state = runCatching { c.node.isChecked }.getOrDefault(false)
-        val known = c.checkable
-        if (on != null && known && state == on) return ActionResult.Success("“$name” is already ${if (on) "on" else "off"}.")
+        fun sameRow(a: NothingAccess.Cand, b: NothingAccess.Cand) = abs(a.rect.centerY() - b.rect.centerY()) < max(b.hit.height(), 60) * 0.6
+        val ctl: NothingAccess.Cand? = if (c.checkable) c else svc.candidates().filter { it.checkable && sameRow(it, c) }.minByOrNull { abs(it.rect.centerX() - c.rect.centerX()) }
+
+        if (ctl != null) {
+            val state = runCatching { ctl.node.isChecked }.getOrDefault(false)
+            if (on != null && state == on) return ActionResult.Success("“$name” is already ${if (on) "on" else "off"}.")
+            ScreenMemory.remember(name, c.hit, svc.frontPackage())
+            if (!svc.click(ctl.node)) return ActionResult.Failure("I couldn't switch “$name”.")
+            delay(320)
+            fun now(): Boolean? { return if (runCatching { ctl.node.refresh() }.getOrDefault(false)) runCatching { ctl.node.isChecked }.getOrNull() else null }
+            var cur = now()
+            if (cur == state) {
+                // The node action did nothing: press the real spot on the switch.
+                svc.centre(ctl.node)?.let { svc.tapAt(it.first, it.second) }
+                delay(360)
+                cur = now()
+            }
+            if (cur == null) return ActionResult.Success("I switched “$name”, but I couldn't confirm the new state.")
+            val want = on ?: !state
+            if (cur != want) return ActionResult.Failure("I pressed “$name”, but it didn't turn ${if (want) "on" else "off"}. It may need a confirmation on screen.")
+            com.demon.nothingassistant.ai.Mem.learnHow("settings", "“$name” is a ${if (ctl.node.className?.toString()?.contains("Check") == true) "checkbox" else "switch"} in ${svc.frontPackage()}; press the switch itself.")
+            return ActionResult.Success("“$name” is now ${if (cur) "on" else "off"}.")
+        }
+
+        // No switch beside the label: the row opens something. Press it and see what appeared.
+        val sigBefore = svc.signature()
+        val titleBefore = svc.topTitle()
         ScreenMemory.remember(name, c.hit, svc.frontPackage())
-        if (!svc.click(c.node)) return ActionResult.Failure("I couldn't switch “$name”.")
-        delay(320)
-        val fresh = runCatching { c.node.refresh() }.getOrDefault(false)
-        val now = runCatching { c.node.isChecked }.getOrDefault(!state)
-        return ActionResult.Success(if (fresh && known) "“$name” is now ${if (now) "on" else "off"}." else "Toggled “$name”.")
+        if (!svc.click(c.node)) return ActionResult.Failure("I couldn't press “$name”.")
+        delay(480)
+        val onWords = listOf("on", "enable", "enabled", "turn on", "allow", "always", "yes", "ok")
+        val offWords = listOf("off", "disable", "disabled", "turn off", "don't allow", "never", "no")
+        fun option(words: List<String>): NothingAccess.Cand? = svc.candidates().firstOrNull { it.label.trim().trim('.', '!').lowercase() in words && (it.clickable || it.checkable) }
+        // a) a menu or dialog with explicit choices
+        if (on != null) {
+            val opt = option(if (on) onWords else offWords)
+            if (opt != null && svc.click(opt.node)) {
+                delay(380)
+                com.demon.nothingassistant.ai.Mem.learnHow("settings", "“$name” opens a list; choose ${if (on) "On" else "Off"}.")
+                return ActionResult.Success("“$name” is now ${if (on) "on" else "off"}.")
+            }
+        }
+        // b) a new page with a switch on it
+        val sw = svc.candidates().filter { it.checkable }.let { l -> l.firstOrNull { it.rect.top < dm.heightPixels * 0.45 } ?: l.firstOrNull() }
+        if (sw != null && svc.signature() != sigBefore) {
+            val st = runCatching { sw.node.isChecked }.getOrDefault(false)
+            val want = on ?: !st
+            if (st != want) {
+                svc.click(sw.node); delay(320)
+                runCatching { sw.node.refresh() }
+                if (runCatching { sw.node.isChecked }.getOrDefault(st) == st) { svc.centre(sw.node)?.let { svc.tapAt(it.first, it.second) }; delay(340); runCatching { sw.node.refresh() } }
+            }
+            val fin = runCatching { sw.node.isChecked }.getOrDefault(st)
+            svc.global(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK); delay(250)
+            if (fin != want) return ActionResult.Failure("I opened “$name” but couldn't change its switch.")
+            com.demon.nothingassistant.ai.Mem.learnHow("settings", "“$name” opens its own page; the switch is at the top of it.")
+            return ActionResult.Success("“$name” is now ${if (fin) "on" else "off"}.")
+        }
+        // c) nothing recognisable happened
+        return if (svc.signature() != sigBefore || svc.topTitle() != titleBefore)
+            ActionResult.Success("I opened “$name”. I couldn't tell which part switches it, so it's open for you.")
+        else ActionResult.Failure("I pressed “$name” but nothing changed, so I can't say it's ${if (on == true) "on" else if (on == false) "off" else "switched"}.")
     }
 
     // ---------- scrolling and small actions ----------

@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.demon.nothingassistant.ai.Mem
 import com.demon.nothingassistant.data.Provider
 import com.demon.nothingassistant.data.Settings
 import kotlinx.coroutines.launch
@@ -58,6 +59,7 @@ fun AiScreen(
     onFetchModels: suspend (Provider) -> Result<List<String>>,
     alwaysThinks: (Provider) -> Boolean,
     onOpenPersona: () -> Unit,
+    onOpenMemory: () -> Unit = {},
     onOpenVoiceTab: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -384,6 +386,8 @@ Spacer(Modifier.height(16.dp))
                         Text(testResult, color = palette.fg, fontSize = 13.sp)
                     }
                 }
+                Spacer(Modifier.height(14.dp))
+                Card(palette) { NavRow(Ic.BRAIN, "Memory files", Mem.total().let { if (it == 0) "What I learn about you and your phone" else "$it notes · profile, topics, areas, system" }, palette, onOpenMemory) }
                 if (readyCount > 0) {
                     Spacer(Modifier.height(14.dp))
                     Card(palette) {

@@ -63,7 +63,16 @@ class NothingAccess : AccessibilityService() {
      * App windows on screen, front-most first, never our own. Keyboard and system-bar windows are left out
      * (unless they are the active window, e.g. the notification shade), so the first entry is the real app in front.
      */
+    private var rootsAt = 0L
+    private var rootsCache: List<AccessibilityNodeInfo> = emptyList()
+
+    /** Forget the quick copy of the screen: called after every action, so the next look is always fresh. */
+    fun fresh() { rootsAt = 0L }
+
     private fun roots(includeOwn: Boolean = false): List<AccessibilityNodeInfo> {
+        // Polling loops ask many times a second; one refreshed copy is good for about a tenth of a second.
+        val nowMs = android.os.SystemClock.uptimeMillis()
+        if (!includeOwn && nowMs - rootsAt < 110 && rootsCache.isNotEmpty()) return rootsCache
         val out = ArrayList<AccessibilityNodeInfo>()
         runCatching {
             val ws = (windows ?: emptyList()).sortedWith(compareByDescending<android.view.accessibility.AccessibilityWindowInfo> { it.isActive }.thenByDescending { it.layer })
@@ -81,6 +90,7 @@ class NothingAccess : AccessibilityService() {
         }
         // Pull a fresh copy: a cached tree is how things that just loaded stay "invisible".
         for (r in out) runCatching { r.refresh() }
+        if (!includeOwn) { rootsCache = out; rootsAt = android.os.SystemClock.uptimeMillis() }
         return out
     }
 
@@ -101,7 +111,7 @@ class NothingAccess : AccessibilityService() {
 
     /** Best visible node whose text or description is (or contains) one of [labels]. Exact matches win. */
     fun find(labels: List<String>): AccessibilityNodeInfo? {
-        val wanted = labels.map { norm(it) }.filter { it.isNotEmpty() }
+        val wanted = com.demon.nothingassistant.action.Synonyms.expand(labels).map { norm(it) }.filter { it.isNotEmpty() }.distinct()
         var best: AccessibilityNodeInfo? = null
         var bestScore = 0
         for (r in roots()) {
@@ -200,6 +210,7 @@ class NothingAccess : AccessibilityService() {
 
     /** Clicks the node, or the nearest clickable parent. Falls back to a tap gesture if nothing is clickable. */
     fun click(n: AccessibilityNodeInfo): Boolean {
+        fresh()
         var c: AccessibilityNodeInfo? = n
         var i = 0
         while (c != null && i < 7) {
@@ -247,6 +258,7 @@ class NothingAccess : AccessibilityService() {
         val r = Rect()
         n.getBoundsInScreen(r)
         if (r.isEmpty) return false
+        com.demon.nothingassistant.service.TaskBlob.clear(r.exactCenterX(), r.exactCenterY())
         val path = Path().apply { moveTo(r.exactCenterX(), r.exactCenterY()) }
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 60)).build()
         return dispatchGesture(g, null, null)
@@ -275,6 +287,7 @@ class NothingAccess : AccessibilityService() {
     }
 
     fun setText(value: String): Boolean {
+        fresh()
         var field: AccessibilityNodeInfo? = null
         for (r in roots()) {
             r.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { if (it.isEditable) field = it }
@@ -297,7 +310,7 @@ class NothingAccess : AccessibilityService() {
         }.getOrDefault(false)
     }
 
-    fun global(action: Int): Boolean = performGlobalAction(action)
+    fun global(action: Int): Boolean { fresh(); return performGlobalAction(action) }
 
     // ---- Understanding the screen ----
 
@@ -365,6 +378,8 @@ class NothingAccess : AccessibilityService() {
 
     /** A drag from one point to another (scrolling, pulling a shade, moving a slider). */
     fun swipeXY(x1: Float, y1: Float, x2: Float, y2: Float, ms: Long = 320): Boolean {
+        fresh()
+        com.demon.nothingassistant.service.TaskBlob.clear(x1, y1); com.demon.nothingassistant.service.TaskBlob.clear(x2, y2)
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, ms)).build()
         return dispatchGesture(g, null, null)
@@ -384,6 +399,8 @@ class NothingAccess : AccessibilityService() {
     }
 
     fun tapAt(x: Float, y: Float): Boolean {
+        fresh()
+        com.demon.nothingassistant.service.TaskBlob.clear(x, y)
         val path = Path().apply { moveTo(x, y) }
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 60)).build()
         return dispatchGesture(g, null, null)
@@ -411,12 +428,16 @@ class NothingAccess : AccessibilityService() {
     }
 
     fun holdAt(x: Float, y: Float, ms: Long): Boolean {
+        fresh()
+        com.demon.nothingassistant.service.TaskBlob.clear(x, y)
         val path = Path().apply { moveTo(x, y) }
         return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, ms)).build(), null, null)
     }
 
     /** Two quick taps in the same place. */
     fun doubleTapAt(x: Float, y: Float): Boolean {
+        fresh()
+        com.demon.nothingassistant.service.TaskBlob.clear(x, y)
         val b = GestureDescription.Builder()
         b.addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(x, y) }, 0, 40))
         b.addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(x, y) }, 140, 40))
@@ -775,6 +796,7 @@ class NothingAccess : AccessibilityService() {
 
     /** Scrolls with the accessibility action only. False when nothing can scroll that way (the end, or no scrollable view). */
     fun scrollDirNode(dir: String): Boolean {
+        fresh()
         val act = when (dir) {
             "down" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
             "up" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP

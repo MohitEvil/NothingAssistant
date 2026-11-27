@@ -50,7 +50,10 @@ object Ocr {
         }
     }
 
-    private suspend fun screenshot(svc: AccessibilityService): Bitmap? = suspendCancellableCoroutine { cont ->
+    /** The blob is hidden for the instant of the capture so it never covers (or gets read as) screen content. */
+    private suspend fun screenshot(svc: AccessibilityService): Bitmap? = com.demon.nothingassistant.service.TaskBlob.hidden { screenshotRaw(svc) }
+
+    private suspend fun screenshotRaw(svc: AccessibilityService): Bitmap? = suspendCancellableCoroutine { cont ->
         try {
             svc.takeScreenshot(Display.DEFAULT_DISPLAY, svc.mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
                 override fun onSuccess(result: AccessibilityService.ScreenshotResult) {

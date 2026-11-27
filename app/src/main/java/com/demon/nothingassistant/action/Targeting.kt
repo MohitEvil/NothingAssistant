@@ -62,9 +62,9 @@ object Targeting {
     }
 
     /** 0..100: how well [label] is what [query] asks for. 100 = the same words. */
-    fun score(query: String, label: String): Int {
-        val a = scoreText(query, label)
-        return if (a >= 90) a else maxOf(a, Matcher.score(query, label))
+    fun score(query: String, label: String): Int = Synonyms.bestScore(query, label) { q, l ->
+        val a = scoreText(q, l)
+        if (a >= 90) a else maxOf(a, Matcher.score(q, l))
     }
 
     private fun scoreText(query: String, label: String): Int {

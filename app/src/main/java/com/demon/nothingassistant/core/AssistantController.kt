@@ -263,6 +263,36 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     /** Cancel from any state; always releases the microphone and silences the voice. */
+    /** The blob was tapped: stop the task right now and stay out of the way. Nothing reopens afterwards. */
+    fun interruptTask() {
+        scope.launch {
+            flow++
+            workJob?.cancel()
+            speakJob?.cancel()
+            voice.stop()
+            com.demon.nothingassistant.service.TaskBlob.hide()
+            com.demon.nothingassistant.service.WindowAnchor.release()
+            haptics.cancel()
+            com.demon.nothingassistant.audio.Cue.closing()
+            transition(AssistantState.IDLE, "", "")
+        }
+    }
+
+    /** Held the blob and chose CHANGE: stop, then listen for the new instruction. */
+    fun changeTask() {
+        scope.launch {
+            interruptTask()
+            kotlinx.coroutines.delay(250)
+            if (!MainActivity.resumed && !PanelActivity.visible) {
+                com.demon.nothingassistant.service.WindowAnchor.hold(context, 20_000L)
+                PanelActivity.show(context)
+                var waited = 0
+                while (!PanelActivity.visible && waited < 2200) { kotlinx.coroutines.delay(40); waited += 40 }
+            }
+            beginListening(Mode.COMMAND)
+        }
+    }
+
     fun cancel() {
         stopEverything()
         if (_ui.value.state != AssistantState.IDLE) haptics.cancel()
@@ -333,6 +363,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     init {
         speech.extraLanguages = { secondLangs() }
+        com.demon.nothingassistant.service.TaskBlob.onStop = { interruptTask() }
+        com.demon.nothingassistant.service.TaskBlob.onChange = { changeTask() }
         com.demon.nothingassistant.ai.Mem.init(context)
         com.demon.nothingassistant.ai.Mem.on = { settings.memoryOn }
         speech.whisperConfig = {
@@ -641,7 +673,12 @@ class AssistantController(private val context: Context, val settings: Settings) 
             is ActionResult.Success -> {
                 val launch = result.launch
                 history.addPair(text, result.message.ifBlank { "Done." }, "action")
-                if (settings.memoryOn && cmd is Command.OpenApp) com.demon.nothingassistant.ai.Mem.noteApp(cmd.name)
+                if (settings.memoryOn) {
+                    if (cmd is Command.OpenApp) com.demon.nothingassistant.ai.Mem.noteApp(cmd.name)
+                    // Remember how a screen-driven job went, so the AI can go straight to it next time.
+                    if (cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.UiSwitch || cmd is Command.OpenSetting || cmd is Command.Task)
+                        com.demon.nothingassistant.ai.Mem.learnHow("commands", "\"${text.take(70)}\" worked: ${cmd.describe().take(80)}")
+                }
                 com.demon.nothingassistant.intent.FollowUp.remember(text, cmd)
                 pendingLearn?.let { (t, raw) -> if (t == text) com.demon.nothingassistant.agent.Skills.learn(t, raw) }
                 replayPattern?.let { com.demon.nothingassistant.agent.Skills.succeeded(it) }
@@ -802,7 +839,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private fun remember(user: String, reply: String) {
         history.addPair(user, reply, "chat")
-        if (settings.memoryOn) scope.launch { runCatching { com.demon.nothingassistant.ai.Mem.learn(brain, user) } }
+        if (settings.memoryOn) scope.launch { runCatching { com.demon.nothingassistant.ai.Mem.learn(brain, user, reply) } }
     }
 
     /** Shows and speaks an answer, then opens the mic again for a follow-up. */
@@ -1066,6 +1103,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
         reply: String = "",
         micOpen: Boolean = false
     ) {
+        // The small blob stays on screen for the whole of a task, so it can always be stopped or changed.
+        if (state == AssistantState.EXECUTING) com.demon.nothingassistant.service.TaskBlob.show(context, status.ifBlank { "Working…" })
+        else com.demon.nothingassistant.service.TaskBlob.hide()
         if (state == AssistantState.IDLE) { inSession = false; sessionBlank = 0; if (liveOn.value) livePause.value = true }
         if (liveOn.value) {
             when (state) {

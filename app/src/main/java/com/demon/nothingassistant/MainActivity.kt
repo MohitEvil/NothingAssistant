@@ -112,6 +112,8 @@ class MainActivity : ComponentActivity() {
         val ui by controller.ui.collectAsStateWithLifecycle()
         var showSettings by remember { mutableStateOf(false) }
         var showPersona by remember { mutableStateOf(false) }
+        var showMemory by remember { mutableStateOf(false) }
+        var memoryFile by remember { mutableStateOf<String?>(null) }
         var showVoice by remember { mutableStateOf(false) }
         var showAi by remember { mutableStateOf(false) }
         var showAiVoice by remember { mutableStateOf(false) }
@@ -182,13 +184,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        BackHandler(enabled = showLive || showAppearance || showLog || showAi || showAiVoice || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
+        BackHandler(enabled = showLive || showAppearance || showLog || showAi || showAiVoice || showAccess || showSettings || showPersona || showMemory || showVoice || ui.state != AssistantState.IDLE) {
             when {
                 showLive -> { controller.stopLive(); showLive = false }
                 showAppearance -> showAppearance = false
                 showLog -> showLog = false
                 showVoice -> showVoice = false
                 showAccess -> showAccess = false
+                showMemory -> if (memoryFile != null) memoryFile = null else showMemory = false
                 showPersona -> showPersona = false
                 showAiVoice -> showAiVoice = false
                 showAi -> showAi = false
@@ -234,6 +237,8 @@ class MainActivity : ComponentActivity() {
                 },
                 onClose = { showAccess = false }
             )
+        } else if (showMemory) {
+            MemoryScreen(settings = settings, palette = palette, open = memoryFile, onOpen = { memoryFile = it }, onClose = { showMemory = false; memoryFile = null })
         } else if (showPersona) {
             PersonaScreen(
                 settings = settings,
@@ -260,6 +265,7 @@ class MainActivity : ComponentActivity() {
                 onFetchModels = controller::fetchModels,
                 alwaysThinks = controller::modelAlwaysThinks,
                 onOpenPersona = { showPersona = true },
+                onOpenMemory = { showMemory = true },
                 onOpenVoiceTab = { showAi = false; showAiVoice = true },
                 onClose = { showAi = false }
             )

@@ -42,7 +42,12 @@ class AiAgent(
         val ordered = Targeting.reading(svc.candidates())
         for (c in ordered) {
             val isPw = runCatching { c.node.isPassword }.getOrDefault(false)
-            val label = (if (isPw) "(password field)" else c.label).trim().replace(Regex("\\s+"), " ").take(50)
+            var label = (if (isPw) "(password field)" else c.label).trim().replace(Regex("\\s+"), " ").take(50)
+            // A switch usually has no words of its own: name it after the text on its row, so the AI knows which setting it belongs to.
+            if (c.checkable && label.length < 2) {
+                ordered.filter { !it.checkable && it.label.isNotBlank() && Math.abs(it.rect.centerY() - c.rect.centerY()) < Math.max(c.hit.height(), 60) * 0.6 && it.rect.centerX() < c.rect.centerX() }
+                    .minByOrNull { Math.abs(it.rect.centerY() - c.rect.centerY()) }?.let { label = it.label.trim().replace(Regex("\\s+"), " ").take(46) }
+            }
             val kind = when { c.editable -> "field"; c.checkable -> "switch"; c.clickable -> "button"; else -> "text" }
             if (kind == "text" && label.length < 2) continue
             if (label.isEmpty() && kind == "text") continue
@@ -99,6 +104,7 @@ class AiAgent(
             "fail {reason} - it can't be done (one short spoken sentence)\n" +
             "Rules: prefer direct routes (open_settings, intent, shell, open_app) over long tapping. If an option is not where you expected, don't guess blindly: use settings_search or go back and look at the screen again. " +
             "After a tap look at whether the screen changed as expected; if you are on the wrong screen, press back or take another route. Never repeat the same failing action more than twice. " +
+            "Turning something on/off: first work out what the control is. A switch or checkbox in the row: tap the SWITCH itself (the element marked checkable), not the text. A row with no switch usually opens a page (the switch is inside) or a list/dialog (pick On/Off, Enable/Disable). A round or square option: tap the option. Settings use different names for the same thing (dark mode = dark theme, screen timeout = display timeout = sleep, hotspot = tethering), so match by meaning. Never say done until the screen shows the new state. If the user taps the floating blob the job is stopped; do not restart it. " +
             "Check results: for a switch, make sure its state ended up ON/OFF as wanted. Never press pay, buy, order, confirm-payment or send-money buttons; finish with done and tell the user what is left. " +
             "Keep the user's language for done/fail/answer texts. Android tips: Settings has a search box at the top; Developer options are under System; quick toggles live in quick_settings; Nothing OS keeps Wi-Fi under Network & internet and default apps under Apps."
 
@@ -151,7 +157,7 @@ class AiAgent(
             val now = look(svc)
             val needLook = step == 1 || now.els.size < 5 || lastChangedNot
             val img = if (!noImage && needLook && vision() && svc != null) runCatching { Ocr.screenJpeg(svc, 720) }.getOrNull() else null
-            val q = "GOAL: $goal\nHISTORY:\n" + (if (hist.isEmpty()) "(nothing yet)" else hist.takeLast(8).joinToString("\n")) + "\n\nSCREEN NOW:\n" + now.text
+            val q = "GOAL: $goal\nHISTORY:\n" + (if (hist.isEmpty()) "(nothing yet)" else hist.takeLast(8).joinToString("\n")) + "\n\nSCREEN NOW:\n" + now.text + com.demon.nothingassistant.ai.Mem.systemBlock(goal)
             var reply: String? = null
             var lastErr = ""
             for (attempt in 1..4) {
@@ -188,7 +194,10 @@ class AiAgent(
                 progress(friendly(o, el))
 
                 when (action) {
-                    "done" -> return ActionResult.Success(o.optString("summary").ifBlank { "Done." })
+                    "done" -> {
+                        if (hist.isNotEmpty()) com.demon.nothingassistant.ai.Mem.learnHow("commands", "\"${goal.take(60)}\" was done by: " + hist.takeLast(4).joinToString(" > ") { it.substringAfter(". ").substringBefore(" ->").take(40) })
+                        return ActionResult.Success(o.optString("summary").ifBlank { "Done." })
+                    }
                     "answer" -> return ActionResult.Success(o.optString("text").ifBlank { "I couldn't tell." })
                     "fail" -> return ActionResult.Failure(o.optString("reason").ifBlank { "I couldn't do that." })
                 }
