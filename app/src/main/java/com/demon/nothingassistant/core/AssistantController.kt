@@ -427,6 +427,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         micActive = true
         com.demon.nothingassistant.audio.Cue.listening()
         speech.start(settings.language, settings.preferOffline, settings.asrEngine)
+        runCatching { brain.warmUp() }
         ensureWindow()
     }
 
@@ -907,7 +908,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         lastActive = SystemClock.uptimeMillis()
         if ((((settings.followUp || settings.stayOpen) && sensibleToOpen(lastReply.trim().endsWith("?")) && replyInvitesMore()) || liveOn.value) && hasMicPermission()) {
             speakJob = scope.launch {
-                delay(120)
+                delay(60)
                 beginListening(Mode.FOLLOWUP)
             }
         } else {
@@ -1141,12 +1142,12 @@ class AssistantController(private val context: Context, val settings: Settings) 
         if (settings.speakReplies && voice.available) {
             voice.speak(message, { go() }, { if (keepOpen && token == flow) continueSession() })
             scope.launch {
-                delay(350) // never hold the action back longer than this if the voice is slow to start
+                delay(280) // never hold the action back longer than this if the voice is slow to start
                 go()
             }
         } else {
             go()
-            if (keepOpen) scope.launch { delay(900); if (token == flow) continueSession() }
+            if (keepOpen) scope.launch { delay(600); if (token == flow) continueSession() }
         }
         if (!keepOpen) scheduleIdle(1800)
     }

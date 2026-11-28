@@ -298,3 +298,9 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 ## Round 19 — NType 82 fonts, personal idle suggestions
 - **Nothing's NType 82 is now inside the app** (Regular, Mono, Headline). Regular is the text font, Mono is for small labels, Headline is for the spoken reply, answer cards, the live screen and the voice picker title. Typed text uses it too. Hindi and other scripts the font doesn't hold use the phone's normal font automatically.
 - **Idle suggestions fit you**: the "TRY" chips now include your most-opened apps and the people you reach most, mixed with the usual examples.
+
+## Round 20 — Build fix and speed
+- **Build fix**: older uploads left the retired wake-word files (WakeService, WakeSetup, WakeVoice, Voiceprint) in the repository, and they no longer compile. The build workflow now deletes them before compiling. You can also delete those four files by hand.
+- **Quicker end of speech**: short commands are sent to Whisper after 0.65 s of silence (0.85 s for longer sentences); Google's recogniser is asked to finish after 1.0 s instead of 1.3 s.
+- **AI connection pre-warm**: when the mic opens, the app already connects to the AI provider (no AI usage), so the first request does not wait for the secure handshake.
+- **Shorter idle waits** before follow-up listening and before the action starts while a spoken status begins.

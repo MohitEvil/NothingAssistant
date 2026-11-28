@@ -38,6 +38,26 @@ class Brain(private val settings: Settings) {
 
     fun configured(): Boolean = settings.aiEnabled && settings.providers.any { it.ready }
 
+    @Volatile private var warmedAt = 0L
+
+    /** Opens the network connection to the first AI provider ahead of time (DNS, TCP and TLS), so the real request starts faster. Costs no AI usage. */
+    fun warmUp() {
+        val now = System.currentTimeMillis()
+        if (now - warmedAt < 40_000 || !configured()) return
+        warmedAt = now
+        val p = settings.providers.toList().firstOrNull { it.ready } ?: return
+        val base = p.baseUrl.trim().trimEnd('/')
+        if (!base.startsWith("http")) return
+        Thread {
+            runCatching {
+                val c = URL(base).openConnection() as HttpURLConnection
+                c.requestMethod = "HEAD"; c.connectTimeout = 4000; c.readTimeout = 4000
+                c.responseCode // the connection is kept in the pool for the next request to the same host
+                runCatching { c.inputStream.close() }
+            }
+        }.apply { isDaemon = true }.start()
+    }
+
     /** Tries each ready provider in order and uses the first that answers. */
     suspend fun ask(history: List<Turn>, userText: String, system: String? = null, image: String? = null, big: Boolean = false, fast: Boolean = false): Result<String> {
         var last: Result<String> = Result.failure(BrainException("No AI provider is set up."))

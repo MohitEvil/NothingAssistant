@@ -97,7 +97,7 @@ class WhisperAsr {
                     if (loud) { speechMs += 50; silenceMs = 0 } else silenceMs += 50
                 }
                 val now = System.currentTimeMillis() - started
-                if (spoke && silenceMs >= 850 && speechMs >= 250) break
+                if (spoke && silenceMs >= (if (speechMs < 2500) 650 else 850) && speechMs >= 250) break // short commands end sooner
                 if (spoke && finishNow) break
                 if (!spoke && finishNow) break
                 if (!spoke && now > 7000) break
