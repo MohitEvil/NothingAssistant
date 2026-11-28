@@ -1,5 +1,7 @@
 package com.demon.nothingassistant.audio
 
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.log10
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -39,7 +41,7 @@ object VoiceBands {
         if (n < 256) return
         val m = minOf(n, 512)
         for (i in 0 until 512) { re[i] = if (i < m) buf[i] / 32768f * win[i] else 0f; im[i] = 0f }
-        WakeVoice.fft(re, im)
+        fft(re, im)
         for (b in 0 until N) {
             val lo = (edges[b] * 512 / rate).toInt().coerceIn(1, 255)
             val hi = (edges[b + 1] * 512 / rate).toInt().coerceIn(lo, 255)
@@ -102,4 +104,34 @@ object VoiceBands {
     }
 
     fun clear() { for (i in 0 until N) levels[i] = 0f; realUntil = 0L }
+
+    private fun fft(re: FloatArray, im: FloatArray) {
+        val n = re.size
+        var j = 0
+        for (i in 1 until n) {
+            var bit = n shr 1
+            while (j and bit != 0) { j = j xor bit; bit = bit shr 1 }
+            j = j xor bit
+            if (i < j) { val a = re[i]; re[i] = re[j]; re[j] = a; val b = im[i]; im[i] = im[j]; im[j] = b }
+        }
+        var len = 2
+        while (len <= n) {
+            val ang = -2.0 * PI / len
+            val wr = cos(ang).toFloat(); val wi = sin(ang).toFloat()
+            var i = 0
+            while (i < n) {
+                var cr = 1f; var ci = 0f
+                for (k in 0 until len / 2) {
+                    val ur = re[i + k]; val ui = im[i + k]
+                    val vr = re[i + k + len / 2] * cr - im[i + k + len / 2] * ci
+                    val vi = re[i + k + len / 2] * ci + im[i + k + len / 2] * cr
+                    re[i + k] = ur + vr; im[i + k] = ui + vi
+                    re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi
+                    val nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr
+                }
+                i += len
+            }
+            len = len shl 1
+        }
+    }
 }

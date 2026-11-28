@@ -60,7 +60,7 @@ fun SettingsScreen(
     onOpenLog: () -> Unit,
     onClose: () -> Unit
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     Column(
         Modifier
             .fillMaxSize()
@@ -188,7 +188,7 @@ internal fun SectionLabel(text: String, palette: GlyphPalette) {
     Text(
         text,
         color = palette.muted,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = NFont.label,
         fontSize = 10.sp,
         letterSpacing = 2.sp,
         modifier = Modifier.padding(bottom = 10.dp)
@@ -235,7 +235,7 @@ internal fun Chip(text: String, selected: Boolean, palette: GlyphPalette, onClic
     Text(
         text,
         color = if (selected) palette.bg else palette.fg,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = NFont.label,
         fontSize = 12.sp,
         letterSpacing = 1.sp,
         modifier = Modifier
@@ -259,14 +259,14 @@ internal fun Field(
     readOnly: Boolean = false,
     onChange: (String) -> Unit
 ) {
-    Text(label, color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
+    Text(label, color = palette.muted, fontFamily = NFont.label, fontSize = 10.sp, letterSpacing = 2.sp)
     Spacer(Modifier.height(6.dp))
     BasicTextField(
         value = value,
         onValueChange = onChange,
         readOnly = readOnly,
         singleLine = true,
-        textStyle = TextStyle(color = palette.fg, fontSize = 14.sp, fontFamily = FontFamily.Monospace),
+        textStyle = TextStyle(color = palette.fg, fontSize = 14.sp, fontFamily = NFont.label),
         cursorBrush = SolidColor(palette.red),
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else keyboard),

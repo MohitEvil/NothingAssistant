@@ -10,7 +10,7 @@ import android.view.WindowManager
 
 /**
  * A one-pixel invisible window. Android only lets an app open a screen from the background when it already has a window showing;
- * holding this while the assistant works (and while the wake word fires) means the small panel can always come back on top,
+ * holding this while the assistant works means the small panel can always come back on top,
  * so the assistant never ends up listening with nothing on screen.
  */
 object WindowAnchor {

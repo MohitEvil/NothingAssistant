@@ -160,7 +160,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             amplitude.floatValue = 0f
             when (mode) {
                 Mode.COMMAND -> if (text.isBlank()) noMatch() else heard(text)
-                Mode.FOLLOWUP -> if (text.isBlank()) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else { sessionBlank = 0; heard(text) }
+                Mode.FOLLOWUP -> if (text.isBlank()) { noteSilentWindow(); if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else { sessionBlank = 0; heard(text) }
                 Mode.CONFIRM -> if (text.isBlank() && relistenConfirm()) Unit else handleConfirmAnswer(text)
             }
         }
@@ -193,7 +193,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             val silent = code == 6 || code == 7 // SPEECH_TIMEOUT, NO_MATCH
             when (mode) {
                 Mode.COMMAND -> if (silent) noMatch() else fail(errorMessage(code))
-                Mode.FOLLOWUP -> if (silent) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else fail(errorMessage(code))
+                Mode.FOLLOWUP -> if (silent) { noteSilentWindow(); if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else fail(errorMessage(code))
                 Mode.CONFIRM -> {
                     val pending = _ui.value.pending
                     if (silent && pending != null) { if (!relistenConfirm()) decline(pending) } else fail(errorMessage(code))
@@ -393,6 +393,17 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     private fun beginListening(m: Mode) {
+        // A window the assistant opens by itself (follow-up, yes/no) never cuts off what is still being said: it waits for the voice to finish.
+        if ((m == Mode.FOLLOWUP || m == Mode.CONFIRM) && voice.isSpeaking) {
+            val t = flow
+            speakJob?.cancel()
+            speakJob = scope.launch {
+                var w = 0
+                while (voice.isSpeaking && w < 25_000 && t == flow) { delay(100); w += 100 }
+                if (t == flow) beginListening(m)
+            }
+            return
+        }
         resetJob?.cancel()
         workJob?.cancel()
         speakJob?.cancel()
@@ -454,6 +465,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     private fun heard(text: String) {
+        autoSilence = 0
         haptics.veryLightTap()
         process(text)
     }
@@ -708,6 +720,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 history.addPair(text, result.message.ifBlank { "Done." }, "action")
                 if (settings.memoryOn) {
                     if (cmd is Command.OpenApp) com.demon.nothingassistant.ai.Mem.noteApp(cmd.name)
+                    com.demon.nothingassistant.ai.Mem.noteUse(text,
+                        who = when (cmd) { is Command.Call -> cmd.target; is Command.SendSms -> cmd.recipient; is Command.ComposeSms -> cmd.displayName; is Command.AskMessage -> cmd.contact; else -> "" },
+                        topic = when (cmd) { is Command.Search -> cmd.query; is Command.SmartSearch -> cmd.query; is Command.News -> cmd.topic; is Command.AppSearch -> cmd.query; else -> "" })
                     scope.launch { runCatching { com.demon.nothingassistant.ai.Mem.learn(brain, text, result.message) } }
                     // Remember how a screen-driven job went, so the AI can go straight to it next time.
                     if (cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.UiSwitch || cmd is Command.OpenSetting || cmd is Command.Task)
@@ -890,7 +905,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private fun afterReply() {
         lastActive = SystemClock.uptimeMillis()
-        if ((((settings.followUp || settings.stayOpen) && replyInvitesMore()) || liveOn.value) && hasMicPermission()) {
+        if ((((settings.followUp || settings.stayOpen) && sensibleToOpen(lastReply.trim().endsWith("?")) && replyInvitesMore()) || liveOn.value) && hasMicPermission()) {
             speakJob = scope.launch {
                 delay(120)
                 beginListening(Mode.FOLLOWUP)
@@ -1036,9 +1051,34 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     /** After a finished task: listen again only when it needs an answer, or when something more is likely to follow (a step in a chain, an app just opened). */
+    /** Windows opened by the assistant itself that nobody answered, lately. A few in a row means the user is done, so it stops opening them. */
+    private var autoSilence = 0
+    private var autoSilenceAt = 0L
+    private fun noteSilentWindow() { autoSilence++; autoSilenceAt = SystemClock.uptimeMillis() }
+
+    /** Is it a sensible moment to open the mic by itself? Not with the screen off or locked, during a call, over music (unless a question was asked), or after several unanswered windows. */
+    private fun sensibleToOpen(question: Boolean): Boolean {
+        if (liveOn.value) return true
+        if (SystemClock.uptimeMillis() - autoSilenceAt > 10 * 60_000L) autoSilence = 0
+        if (autoSilence >= 3 && !question) return false
+        return runCatching {
+            val pm = context.getSystemService(android.os.PowerManager::class.java)
+            val km = context.getSystemService(android.app.KeyguardManager::class.java)
+            val am = context.getSystemService(android.media.AudioManager::class.java)
+            when {
+                !pm.isInteractive -> false
+                km.isKeyguardLocked -> false
+                am.mode == android.media.AudioManager.MODE_IN_CALL || am.mode == android.media.AudioManager.MODE_IN_COMMUNICATION || am.mode == android.media.AudioManager.MODE_RINGTONE -> false
+                !question && am.isMusicActive -> false
+                else -> true
+            }
+        }.getOrDefault(true)
+    }
+
     private fun smartListen(message: String): Boolean {
         val c = listenCmd
         listenCmd = null
+        if (!sensibleToOpen(message.trim().endsWith("?"))) return false
         if (message.trim().endsWith("?") || Regex("\\b(which one|what should|who did you mean|say confirm|tell me which)\\b", RegexOption.IGNORE_CASE).containsMatchIn(message)) return true
         return !(c != null && isTerminal(c))
     }

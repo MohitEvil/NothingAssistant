@@ -53,7 +53,7 @@ fun MiniChip(text: String, palette: GlyphPalette, onClick: () -> Unit) {
             .padding(horizontal = 14.dp, vertical = 9.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, color = palette.fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.sp)
+        Text(text, color = palette.fg, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 1.sp)
     }
 }
 
@@ -77,16 +77,16 @@ fun AnswerCard(
             .padding(horizontal = 18.dp, vertical = 14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("ANSWER", color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
+            Text("ANSWER", color = palette.muted, fontFamily = NFont.label, fontSize = 10.sp, letterSpacing = 2.sp)
             Box(Modifier.weight(1f))
             Text(
-                "CLOSE", color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp,
+                "CLOSE", color = palette.muted, fontFamily = NFont.label, fontSize = 10.sp, letterSpacing = 2.sp,
                 modifier = Modifier.clickable(onClick = onDismiss).padding(vertical = 4.dp, horizontal = 4.dp)
             )
         }
         Spacer(Modifier.height(8.dp))
         Column(Modifier.heightIn(max = 170.dp).verticalScroll(rememberScrollState())) {
-            Text(answer.answer, color = palette.fg, fontSize = 15.sp, lineHeight = 21.sp)
+            Text(answer.answer, color = palette.fg, fontFamily = NFont.headline, fontSize = 16.sp, lineHeight = 22.sp)
         }
         Spacer(Modifier.height(12.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -135,9 +135,10 @@ private val SUGGESTIONS = listOf(
 fun SuggestionChips(palette: GlyphPalette, onPick: (String) -> Unit) {
     val picks = remember {
         val start = ((System.currentTimeMillis() / 3_600_000L) % SUGGESTIONS.size).toInt()
-        List(4) { SUGGESTIONS[(start + it * 3) % SUGGESTIONS.size] }
+        val mine = runCatching { com.demon.nothingassistant.ai.Mem.suggestions() }.getOrDefault(emptyList()).shuffled().take(2)
+        mine + List(4 - mine.size) { SUGGESTIONS[(start + it * 3) % SUGGESTIONS.size] }
     }
-    Text("TRY", color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
+    Text("TRY", color = palette.muted, fontFamily = NFont.label, fontSize = 10.sp, letterSpacing = 2.sp)
     Spacer(Modifier.height(8.dp))
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
@@ -166,7 +167,7 @@ fun TypeBox(palette: GlyphPalette, onSend: (String) -> Unit, modifier: Modifier 
                 value = text,
                 onValueChange = { text = it },
                 singleLine = true,
-                textStyle = TextStyle(color = palette.fg, fontSize = 14.sp),
+                textStyle = TextStyle(color = palette.fg, fontSize = 14.sp, fontFamily = NFont.body),
                 cursorBrush = SolidColor(palette.fg),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() }),
@@ -174,7 +175,7 @@ fun TypeBox(palette: GlyphPalette, onSend: (String) -> Unit, modifier: Modifier 
             )
         }
         Text(
-            "SEND", color = if (text.isBlank()) palette.dim else palette.fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp,
+            "SEND", color = if (text.isBlank()) palette.dim else palette.fg, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 2.sp,
             modifier = Modifier.clickable(enabled = text.isNotBlank()) { send() }.padding(horizontal = 14.dp, vertical = 12.dp)
         )
     }

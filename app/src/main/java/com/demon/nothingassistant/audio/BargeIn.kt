@@ -50,6 +50,7 @@ class BargeIn(private val context: Context) {
         val buf = ShortArray(1600) // 100 ms
         var frame = 0
         var base = 0.01f
+        var echo = 0.01f // the loudest recent level of the assistant's own voice coming back in, slowly forgotten
         var hot = 0
         try {
             ar.startRecording()
@@ -60,16 +61,18 @@ class BargeIn(private val context: Context) {
                 for (i in 0 until n) { val v = buf[i] / 32768.0; sum += v * v }
                 val rms = sqrt(sum / n).toFloat()
                 frame++
-                if (frame <= 6) { base = maxOf(base, rms); continue } // first 0.6 s: just learn how loud the echo is
-                val trigger = maxOf(base * 2.4f, 0.04f)
+                if (frame <= 8) { base = maxOf(base, rms); echo = base; continue } // first 0.8 s: just learn how loud the echo is
+                // The voice itself rises and falls, so compare with its recent peak, not its average: only something clearly louder counts.
+                val trigger = maxOf(echo * 2.6f, base * 3f, 0.07f)
                 if (rms > trigger) {
                     hot++
-                    if (hot >= 3) { // about 0.3 s of something clearly louder than the echo
+                    if (hot >= 5) { // about half a second of something clearly louder than the echo
                         main.post { if (my == gen) { gen++; onVoice() } }
                         return
                     }
                 } else {
                     hot = 0
+                    echo = maxOf(echo * 0.985f, rms)
                     base = base * 0.97f + rms * 0.03f
                 }
             }

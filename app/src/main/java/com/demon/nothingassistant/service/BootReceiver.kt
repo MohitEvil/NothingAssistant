@@ -17,7 +17,6 @@ class BootReceiver : BroadcastReceiver() {
                 try { com.demon.nothingassistant.priv.AutoGrant.keepAssistant(context.applicationContext, 6) } finally { pending.finish() }
             }
         }
-        if (context.getSharedPreferences("nothing_settings", Context.MODE_PRIVATE).getBoolean("wake_word", false)) WakeService.start(context)
         if (Settings.bubbleEnabled(context) && android.provider.Settings.canDrawOverlays(context)) {
             runCatching { OverlayService.start(context) }
         }

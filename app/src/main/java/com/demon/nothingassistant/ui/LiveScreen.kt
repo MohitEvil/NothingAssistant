@@ -63,7 +63,7 @@ fun LiveScreen(
     palette: GlyphPalette,
     onClose: () -> Unit
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     val log = controller.liveLog
     val paused = controller.livePaused
     var typing by remember { mutableStateOf(false) }
@@ -137,7 +137,7 @@ fun LiveScreen(
                         )
                     }
                 } else {
-                    Text(line.text, color = palette.fg, fontSize = 17.sp, lineHeight = 26.sp)
+                    Text(line.text, color = palette.fg, fontFamily = NFont.headline, fontSize = 18.sp, lineHeight = 27.sp)
                 }
             }
             if (ui.transcript.isNotBlank() && (ui.state == AssistantState.RECOGNIZING || ui.state == AssistantState.LISTENING) && log.lastOrNull()?.text != ui.transcript) item {
@@ -153,7 +153,7 @@ fun LiveScreen(
             Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 BasicTextField(
                     value = text, onValueChange = { text = it }, singleLine = true,
-                    textStyle = TextStyle(color = palette.fg, fontSize = 15.sp),
+                    textStyle = TextStyle(color = palette.fg, fontSize = 15.sp, fontFamily = NFont.body),
                     cursorBrush = SolidColor(palette.red),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),

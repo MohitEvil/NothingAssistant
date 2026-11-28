@@ -152,15 +152,6 @@ class Settings(context: Context) {
     /** Keep Nothing Assistant as the default digital assistant after a restart (needs Shizuku or root). */
     var keepAssistant by mutableStateOf(sp.getBoolean("keep_assistant", true))
         private set
-    var wakeWord by mutableStateOf(sp.getBoolean("wake_word", false))
-        private set
-    var wakePhrase by mutableStateOf(sp.getString("wake_phrase", "hey nothing") ?: "hey nothing")
-        private set
-    /** Different ways the recogniser heard the phrase while training. */
-    var wakeVariants by mutableStateOf((sp.getStringSet("wake_variants", emptySet()) ?: emptySet()).toList().sorted())
-        private set
-    var wakeSens by mutableStateOf(sp.getFloat("wake_sens", 0.5f))
-        private set
     /** True once the welcome setup has been completed or skipped. */
     var onboarded by mutableStateOf(sp.getBoolean("onboarded", false))
         private set
@@ -183,9 +174,6 @@ class Settings(context: Context) {
             (providers.toList() + voiceProviders.toList()).firstOrNull { it.baseUrl.contains("groq.com") && it.key.isNotBlank() }?.key.orEmpty().trim()
         }
 
-    /** Wake only for the voice that was trained in Voice Match. */
-    var voiceLock by mutableStateOf(sp.getBoolean("voice_lock", true))
-        private set
 
     /** Look: 0 plain Nothing, 1 liquid glass, 2 minimal liquid glass. */
     var glassStyle by mutableIntStateOf(sp.getInt("glass_style", 0))
@@ -404,12 +392,6 @@ class Settings(context: Context) {
     fun setInterrupt(v: Boolean) { interrupt = v; sp.edit().putBoolean("speak_interrupt", v).apply() }
     @JvmName("applyKeepAssistant")
     fun setKeepAssistant(v: Boolean) { keepAssistant = v; sp.edit().putBoolean("keep_assistant", v).apply() }
-    @JvmName("applyWakeWord")
-    fun setWakeWord(v: Boolean) { wakeWord = v; sp.edit().putBoolean("wake_word", v).apply() }
-    @JvmName("applyWakePhrase")
-    fun setWakePhrase(v: String) { wakePhrase = v.trim().lowercase(); wakeVariants = emptyList(); sp.edit().putString("wake_phrase", wakePhrase).putStringSet("wake_variants", emptySet()).apply() }
-    @JvmName("applyWakeVariants")
-    fun setWakeVariants(v: List<String>) { wakeVariants = v.distinct().sorted(); sp.edit().putStringSet("wake_variants", wakeVariants.toSet()).apply() }
     @JvmName("applyGoogleOffline")
     fun setGoogleOffline(v: List<String>) { googleOffline = v.distinct().sorted(); sp.edit().putStringSet("google_offline", googleOffline.toSet()).apply() }
     @JvmName("applySecondLang")
@@ -424,10 +406,6 @@ class Settings(context: Context) {
     fun setWhisperModel(v: String) { whisperModel = v; sp.edit().putString("whisper_model", v).apply() }
     @JvmName("applyMemoryOn")
     fun setMemoryOn(v: Boolean) { memoryOn = v; sp.edit().putBoolean("memory_on", v).apply() }
-    @JvmName("applyVoiceLock")
-    fun setVoiceLock(v: Boolean) { voiceLock = v; sp.edit().putBoolean("voice_lock", v).apply() }
-    @JvmName("applyWakeSens")
-    fun setWakeSens(v: Float) { wakeSens = v; sp.edit().putFloat("wake_sens", v).apply() }
     @JvmName("applyTheme")
     fun setTheme(v: Int) { theme = v; sp.edit().putInt("theme", v).apply() }
     @JvmName("applyGlassStyle")

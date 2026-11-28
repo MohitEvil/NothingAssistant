@@ -73,7 +73,7 @@ fun LogScreen(palette: GlyphPalette, onClose: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("‹", color = palette.fg, fontSize = 28.sp, modifier = Modifier.clickable(onClick = onClose).padding(end = 12.dp))
-            Text("DEBUG LOG", color = palette.fg, fontSize = 16.sp, fontFamily = FontFamily.Monospace)
+            Text("DEBUG LOG", color = palette.fg, fontSize = 16.sp, fontFamily = NFont.label)
         }
         Spacer(Modifier.height(10.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -98,7 +98,7 @@ fun LogScreen(palette: GlyphPalette, onClose: () -> Unit) {
                 color = palette.fg,
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = NFont.label,
                 modifier = Modifier.verticalScroll(scroll)
             )
         }

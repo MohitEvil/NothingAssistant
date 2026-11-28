@@ -56,7 +56,7 @@ fun AiVoiceScreen(
     onOpenChatTab: () -> Unit,
     onClose: () -> Unit
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     val scope = rememberCoroutineScope()
     var selectedId by remember { mutableStateOf<String?>(null) }
     var reorderId by remember { mutableStateOf<String?>(null) }
@@ -368,7 +368,7 @@ Spacer(Modifier.height(16.dp))
 private fun FetchButton(text: String, palette: GlyphPalette, onClick: () -> Unit) {
     Text(
         text,
-        color = palette.fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.sp,
+        color = palette.fg, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 1.sp,
         modifier = Modifier
             .border(BorderStroke(1.dp, palette.muted), RoundedCornerShape(50))
             .clickable(onClick = onClick)

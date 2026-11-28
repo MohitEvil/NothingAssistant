@@ -49,7 +49,7 @@ fun PanelScreen(
     val fps = targetFps(ui.state, perf)
     val clock = rememberGlyphClock(fps)
     val animate = perf != PerfMode.CRITICAL
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     val shape = RoundedCornerShape(28.dp)
 
     Box(

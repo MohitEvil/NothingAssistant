@@ -197,13 +197,6 @@ class VoskAsr(private val context: Context) {
     private fun pick(tag: String, from: List<VoskLang>): VoskLang? =
         from.firstOrNull { it.tag.equals(tag, true) } ?: from.firstOrNull { it.base == tag.substringBefore('-').lowercase() }
 
-    /** A loaded model for the language (or any installed one), for the wake word. Null when none is downloaded. */
-    fun modelFor(tag: String): Model? {
-        val have = installedModels()
-        val m = pick(tag, have) ?: pick("en", have) ?: have.firstOrNull() ?: return null
-        return runCatching { model(m) }.getOrNull()
-    }
-
     fun start(languageTag: String, l: SpeechEngine.Listener) {
         cancel()
         val my = ++gen

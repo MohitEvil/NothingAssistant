@@ -76,10 +76,9 @@ fun WelcomeScreen(
     onFinish: () -> Unit
 ) {
     val ctx = LocalContext.current
-    val mono = FontFamily.Monospace
-    val pages = listOf("hello", "name", "mic", "notif", "overlay", "access", "assistant", "voice", "ready")
+    val mono = NFont.label
+    val pages = listOf("hello", "name", "mic", "notif", "overlay", "access", "assistant", "ready")
     var index by remember { mutableStateOf(0) }
-    var voiceMatch by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf(settings.userName) }
     val page = pages[index]
 
@@ -91,17 +90,11 @@ fun WelcomeScreen(
     val notifOk = remember(refresh, index) { Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED }
     val overlayOk = remember(refresh, index) { AndroidSettings.canDrawOverlays(ctx) }
     val accessOk = remember(refresh, index) { NothingAccess.isEnabled(ctx) }
-    val voiceOk = remember(refresh, index, voiceMatch) { com.demon.nothingassistant.audio.Voiceprint.ready(ctx) }
     val assistOk = remember(refresh, index) {
         runCatching { AndroidSettings.Secure.getString(ctx.contentResolver, "assistant").orEmpty().contains(ctx.packageName) }.getOrDefault(false)
     }
 
-    BackHandler { if (voiceMatch) voiceMatch = false else if (index > 0) index-- }
-
-    if (voiceMatch) {
-        WakeSetup(settings, palette) { voiceMatch = false; next() }
-        return
-    }
+    BackHandler { if (index > 0) index-- }
 
     Column(
         Modifier
@@ -127,7 +120,7 @@ fun WelcomeScreen(
         }
 
         // Live "is it done" for each page that needs something.
-        fun okOf(p: String): Boolean? = when (p) { "mic" -> micOk; "notif" -> notifOk; "overlay" -> overlayOk; "access" -> accessOk; "assistant" -> assistOk; "voice" -> voiceOk; else -> null }
+        fun okOf(p: String): Boolean? = when (p) { "mic" -> micOk; "notif" -> notifOk; "overlay" -> overlayOk; "access" -> accessOk; "assistant" -> assistOk; else -> null }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Crossfade(targetState = index, animationSpec = tween(240), label = "welcome") { i ->
@@ -149,7 +142,7 @@ fun WelcomeScreen(
                                 if (name.isEmpty()) Text("Your name", color = palette.muted, fontSize = 16.sp)
                                 BasicTextField(
                                     value = name, onValueChange = { name = it.take(30) }, singleLine = true,
-                                    textStyle = TextStyle(color = palette.fg, fontSize = 16.sp), cursorBrush = SolidColor(palette.fg),
+                                    textStyle = TextStyle(color = palette.fg, fontSize = 16.sp, fontFamily = NFont.body), cursorBrush = SolidColor(palette.fg),
                                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -168,7 +161,7 @@ fun WelcomeScreen(
                             Column(
                                 Modifier.fillMaxWidth().background(palette.card, RoundedCornerShape(20.dp)).border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(20.dp)).padding(horizontal = 16.dp, vertical = 8.dp)
                             ) {
-                                listOf("mic" to "Microphone", "notif" to "Alerts", "overlay" to "Overlay", "access" to "Control", "assistant" to "Default assistant", "voice" to "Voice Match").forEach { (k, label) ->
+                                listOf("mic" to "Microphone", "notif" to "Alerts", "overlay" to "Overlay", "access" to "Control", "assistant" to "Default assistant").forEach { (k, label) ->
                                     val ok = okOf(k) == true
                                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Text(label, color = palette.fg, fontSize = 14.sp, modifier = Modifier.weight(1f))
@@ -185,7 +178,7 @@ fun WelcomeScreen(
         }
 
         // What the main button does on each page, and whether that page is already done.
-        val done = when (page) { "mic" -> micOk; "notif" -> notifOk; "overlay" -> overlayOk; "access" -> accessOk; "assistant" -> assistOk; "voice" -> voiceOk; else -> false }
+        val done = when (page) { "mic" -> micOk; "notif" -> notifOk; "overlay" -> overlayOk; "access" -> accessOk; "assistant" -> assistOk; else -> false }
         val action = when (page) {
             "hello" -> "GET STARTED"
             "name" -> "CONTINUE"
@@ -194,7 +187,6 @@ fun WelcomeScreen(
             "overlay" -> if (overlayOk) "CONTINUE" else "OPEN SETTINGS"
             "access" -> if (accessOk) "CONTINUE" else "OPEN ACCESSIBILITY"
             "assistant" -> if (assistOk) "CONTINUE" else "SET AS DEFAULT"
-            "voice" -> if (done) "CONTINUE" else "START VOICE MATCH"
             else -> "START TALKING"
         }
         Column(Modifier.fillMaxWidth().padding(bottom = 20.dp, top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -206,12 +198,11 @@ fun WelcomeScreen(
                     "overlay" -> if (overlayOk) next() else openSafely(ctx, Intent(AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
                     "access" -> if (accessOk) next() else openSafely(ctx, Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
                     "assistant" -> if (assistOk) next() else openSafely(ctx, Intent("android.settings.VOICE_INPUT_SETTINGS"))
-                    "voice" -> if (done) next() else voiceMatch = true
                     "ready" -> finish()
                     else -> next()
                 }
             })
-            if (page in listOf("name", "notif", "overlay", "access", "assistant", "voice") && !(done && page != "name")) {
+            if (page in listOf("name", "notif", "overlay", "access", "assistant") && !(done && page != "name")) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "SKIP FOR NOW", color = palette.muted, fontFamily = mono, fontSize = 11.sp, letterSpacing = 2.sp, textAlign = TextAlign.Center,
@@ -235,12 +226,11 @@ private class PageInfo(val title: String, val body: String, val note: String)
 private fun pageInfo(page: String, ok: Boolean, accessOk: Boolean): PageInfo = when (page) {
     "hello" -> PageInfo("HELLO", "I'm your voice assistant. Talk to me to open apps, send messages, set timers, control settings and ask questions. A few quick steps and I'm ready.", "Everything here can be changed later in Settings.")
     "name" -> PageInfo("YOUR NAME", "What should I call you?", "Optional. I only use it to greet you.")
-    "mic" -> PageInfo("MICROPHONE", "So I can hear you. I only listen after you tap me or say the wake phrase, and the mic is closed the rest of the time.", "Needed to talk to me.")
-    "notif" -> PageInfo("ALERTS", "Lets me show the small notice Android requires while the bubble or wake word is running, and read out your notifications if you ask.", "Recommended.")
+    "mic" -> PageInfo("MICROPHONE", "So I can hear you. I only listen after you tap me, and the mic is closed the rest of the time.", "Needed to talk to me.")
+    "notif" -> PageInfo("ALERTS", "Lets me show the small notice Android requires while the bubble is running, and read out your notifications if you ask.", "Recommended.")
     "overlay" -> PageInfo("OVERLAY", "Lets me appear over other apps when you call me, and show the floating bubble. Switch on \"Allow display over other apps\".", "Recommended.")
     "access" -> PageInfo("CONTROL", "Lets me tap, scroll and type for you, like opening a chat and sending a message. Find Nothing Assistant in the list and switch it on.", if (accessOk) "" else "If the switch is greyed out: App info, three dots menu, \"Allow restricted settings\", then try again.")
     "assistant" -> PageInfo("ASSISTANT", "Make me the default digital assistant so the power-button hold or home-corner swipe opens me instead of another assistant.", "Optional.")
-    "voice" -> PageInfo("MY VOICE", "Teach me your voice so I answer only to you, and wake when you say the phrase. It takes about a minute and everything stays on this phone.", "Optional. Everything stays on this phone.")
     else -> PageInfo("READY", "That's it. Tap the glyph and speak, or type a request. Try \"what can you do\" to hear everything I can help with.", "")
 }
 
@@ -252,7 +242,7 @@ private fun StatusChip(text: String, ok: Boolean, palette: GlyphPalette) {
     ) {
         Box(Modifier.size(7.dp).background(if (ok) palette.fg else if (text == "REQUIRED") palette.red else palette.dim, CircleShape))
         Spacer(Modifier.size(8.dp))
-        Text(text, color = if (ok) palette.fg else palette.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
+        Text(text, color = if (ok) palette.fg else palette.muted, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 2.sp)
     }
 }
 
@@ -264,6 +254,5 @@ private val ICONS: Map<String, Ic> = mapOf(
     "notif" to Ic.BELL,
     "overlay" to Ic.LAYERS,
     "access" to Ic.SHIELD,
-    "voice" to Ic.WAVEFORM,
     "ready" to Ic.CHECK
 )

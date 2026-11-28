@@ -52,7 +52,7 @@ fun AccessScreen(
     onSetAssistant: () -> Unit,
     onClose: () -> Unit
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     val ctx: Context = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
     val owner = LocalLifecycleOwner.current

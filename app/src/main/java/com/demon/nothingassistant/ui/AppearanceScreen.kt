@@ -32,7 +32,7 @@ import com.demon.nothingassistant.data.ThemeMode
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AppearanceScreen(settings: Settings, palette: GlyphPalette, onClose: () -> Unit) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     Column(
         Modifier
             .fillMaxSize()

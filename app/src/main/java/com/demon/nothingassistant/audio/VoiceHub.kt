@@ -29,7 +29,11 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
         get() = system.available || neural.phase == NeuralVoice.Phase.READY
 
     override val isSpeaking: Boolean
-        get() = neural.speaking || system.isSpeaking || cloud.speaking
+        get() = starting || neural.speaking || system.isSpeaking || cloud.speaking
+
+    /** True from the moment a line is handed over until its first sound plays (synthesis and the short wait for Google's closing ding), so nobody opens the mic in that gap. */
+    @Volatile private var starting = false
+    @Volatile private var speakGen = 0
 
     private val guard = context.getSharedPreferences("voice_guard", Context.MODE_PRIVATE)
 
@@ -125,11 +129,14 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
     var onBargeIn: (() -> Unit)? = null
 
     override fun speak(raw: String, onStart0: () -> Unit, onDone0: () -> Unit) {
-        val onStart = { if (settings.interrupt && onBargeIn != null) barge.start { barge.stop(); onBargeIn?.invoke() }; onStart0() }
-        val onDone = { barge.stop(); onDone0() }
+        val g = ++speakGen
+        starting = true
+        val onStart = { starting = false; if (g == speakGen && settings.interrupt && onBargeIn != null) barge.start { barge.stop(); onBargeIn?.invoke() }; onStart0() }
+        val onDone = { starting = false; barge.stop(); onDone0() }
         // Google's closing "ding" can land just after the result: hold our first word back (at most 0.7 s) until the quiet window ends.
         val wait = Cue.guardLeft().coerceAtMost(700)
-        if (wait > 80) main.postDelayed({ speakNow(raw, onStart, onDone) }, wait) else speakNow(raw, onStart, onDone)
+        // A line that was stopped (or replaced) while it waited must never be spoken afterwards.
+        if (wait > 80) main.postDelayed({ if (g == speakGen) speakNow(raw, onStart, onDone) }, wait) else speakNow(raw, onStart, onDone)
     }
 
     private fun speakNow(raw: String, onStart: () -> Unit, onDone: () -> Unit) {
@@ -169,6 +176,8 @@ class VoiceHub(private val context: Context, private val settings: Settings) : V
     suspend fun testCloud(p: com.demon.nothingassistant.data.Provider): String = cloud.test(p)
 
     override fun stop() {
+        speakGen++
+        starting = false
         barge.stop()
         cloud.stop()
         neural.stop()

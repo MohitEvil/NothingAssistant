@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         autoStart = shouldAutoStart(intent)
 
-        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing)) { Root() } }
+        setContent { androidx.compose.runtime.CompositionLocalProvider(com.demon.nothingassistant.ui.LocalUiStyle provides com.demon.nothingassistant.ui.UiStyle(settings.glassStyle, settings.blob, settings.typing)) { com.demon.nothingassistant.ui.NFontScope { Root() } } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -74,7 +74,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         runCatching { com.demon.nothingassistant.priv.AutoGrant.noteAssistant(this) }
-        runCatching { if (settings.wakeWord && !com.demon.nothingassistant.service.WakeService.running) com.demon.nothingassistant.service.WakeService.start(this) }
         resumed = true
         resumeTick++
     }

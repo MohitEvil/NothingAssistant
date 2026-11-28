@@ -118,7 +118,7 @@ object TaskBlob {
         private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x88FFFFFF.toInt(); style = Paint.Style.STROKE; strokeWidth = 1.5f * d }
         private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
         private val red = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE5232B.toInt() }
-        private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 11f * d; typeface = android.graphics.Typeface.MONOSPACE; textAlign = Paint.Align.CENTER; letterSpacing = 0.12f }
+        private val txt = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 11f * d; typeface = com.demon.nothingassistant.ui.NFont.native; textAlign = Paint.Align.CENTER; letterSpacing = 0.12f }
         private val holdCheck = Runnable {
             if (!moved) { long = true; performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); onHold() }
         }

@@ -26,9 +26,18 @@ class NothingApp : Application() {
         com.demon.nothingassistant.audio.Cue.recover(this)
         com.demon.nothingassistant.ai.Banter.init(this)
         com.demon.nothingassistant.ai.PyKb.init(this)
+        com.demon.nothingassistant.ui.NFont.init(this)
         settings = Settings(this)
         com.demon.nothingassistant.priv.Priv.preference = { settings.privMode }
         settings.applyDefaultsOnce()
+        // Leftovers from the removed wake word and voice setup: delete their saved recordings and settings.
+        runCatching {
+            filesDir.walkBottomUp().filter { it != filesDir && Regex("wake|voiceprint|voicematch", RegexOption.IGNORE_CASE).containsMatchIn(it.name) }.forEach { it.deleteRecursively() }
+            getSharedPreferences("nothing_settings", MODE_PRIVATE).edit().apply {
+                listOf("wake_word", "wake_phrase", "wake_variants", "wake_sens", "voice_lock").forEach { remove(it) }
+            }.apply()
+            listOf("wake", "voiceprint", "wake_voice").forEach { deleteSharedPreferences(it) }
+        }
         // Someone who updated the app (rather than installed it fresh) has already set it up: skip the welcome screen for them.
         if (!settings.onboarded) runCatching {
             val info = packageManager.getPackageInfo(packageName, 0)

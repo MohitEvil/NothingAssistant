@@ -72,7 +72,7 @@ fun AssistantScreen(
     val clock = rememberGlyphClock(fps)
     val animate = perf != PerfMode.CRITICAL
     val label = labelFor(ui.state)
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
 
     Column(
         Modifier
@@ -165,7 +165,9 @@ fun AssistantScreen(
                         TypeText(
                             ui.reply,
                             color = palette.fg,
-                            fontSize = 17.sp,
+                            fontSize = 18.sp,
+                            fontFamily = NFont.headline,
+                            lineHeight = 26.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -306,7 +308,7 @@ fun PillButton(
         Text(
             text,
             color = if (filled) palette.bg else palette.fg,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = NFont.label,
             fontSize = 12.sp,
             letterSpacing = 2.sp,
             fontWeight = FontWeight.Medium

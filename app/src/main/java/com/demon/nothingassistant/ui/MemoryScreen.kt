@@ -40,7 +40,7 @@ import java.util.Locale
 /** What the assistant knows, as readable files: Profile, Topics, Areas, and System (how things are done on this phone). */
 @Composable
 fun MemoryScreen(settings: Settings, palette: GlyphPalette, open: String?, onOpen: (String?) -> Unit, onClose: () -> Unit) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     var tick by remember { mutableStateOf(0) }
     val files = remember(tick, Mem.version) { Mem.list() }
     val current = open?.let { p -> files.firstOrNull { it.path == p } }

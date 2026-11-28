@@ -55,14 +55,14 @@ internal fun AppPickRow(title: String, subtitle: String, current: String, palett
             Spacer(Modifier.height(2.dp))
             Text(subtitle, color = palette.muted, fontSize = 12.sp)
         }
-        Text(label.uppercase(), color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.sp)
+        Text(label.uppercase(), color = palette.muted, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 1.sp)
     }
     if (open) {
         Dialog(onDismissRequest = { open = false }) {
             Column(
                 Modifier.fillMaxWidth().background(palette.card, RoundedCornerShape(24.dp)).padding(vertical = 12.dp)
             ) {
-                Text(title.uppercase(), color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                Text(title.uppercase(), color = palette.muted, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 2.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                 LazyColumn(Modifier.height(420.dp)) {
                     item {
                         Text("None (use the usual way)", color = palette.fg, fontSize = 15.sp, modifier = Modifier.fillMaxWidth().clickable { onPick(""); open = false }.padding(horizontal = 20.dp, vertical = 12.dp))

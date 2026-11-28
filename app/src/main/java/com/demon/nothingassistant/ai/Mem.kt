@@ -54,11 +54,20 @@ object Mem {
         }
     }
 
+    private val saver = android.os.Handler(android.os.Looper.getMainLooper())
+    private val flushNow = Runnable { flush() }
+
+    /** Writes are batched: many small notes in a row become one disk write. */
     private fun save() {
+        version++
+        saver.removeCallbacks(flushNow)
+        saver.postDelayed(flushNow, 700)
+    }
+
+    @Synchronized private fun flush() {
         val a = JSONArray()
         files.values.forEach { a.put(JSONObject().put("p", it.path).put("d", it.desc).put("b", it.body).put("u", it.updated)) }
         sp?.edit()?.putString("files", a.toString())?.apply()
-        version++
     }
 
     // ---- Reading ----
@@ -180,6 +189,7 @@ object Mem {
         if (politeWords.containsMatchIn(text)) inc("o_polite")
         if (text.trim().endsWith("?") || Regex("^(what|who|when|where|why|how|kya|kaise|kyun|kab|kaun)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text.trim())) inc("o_q") else inc("o_cmd")
         inc(when (hour) { in 5..11 -> "o_morning"; in 12..16 -> "o_afternoon"; in 17..21 -> "o_evening"; else -> "o_night" })
+        inc("o_h$hour"); inc(if (java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK).let { it == java.util.Calendar.SATURDAY || it == java.util.Calendar.SUNDAY }) "o_weekend" else "o_weekday")
         e.apply()
         val n = p.getInt("o_n", 0)
         if (n % 12 != 0) return
@@ -198,6 +208,17 @@ object Mem {
         upsert("topics/with-the-assistant", "Mostly", if (q > c) "Asks questions more than giving commands" else "Gives commands more than asking questions")
         val slots = listOf("morning" to p.getInt("o_morning", 0), "afternoon" to p.getInt("o_afternoon", 0), "evening" to p.getInt("o_evening", 0), "night" to p.getInt("o_night", 0))
         slots.maxByOrNull { it.second }?.let { if (it.second * 3 >= n) upsert("topics/with-the-assistant", "Usually active", it.first, "How and when the user uses the assistant.") }
+        val hours = (0..23).map { it to p.getInt("o_h$it", 0) }.filter { it.second > 0 }.sortedByDescending { it.second }
+        if (n >= 24 && hours.isNotEmpty()) {
+            val top = hours.take(3).map { it.first }.sorted()
+            upsert("topics/daily-rhythm", "Most active around", top.joinToString(", ") { h -> (if (h % 12 == 0) 12 else h % 12).toString() + if (h < 12) " am" else " pm" }, "When the user is up and about, from when they use the phone.")
+            val late = (0..4).sumOf { p.getInt("o_h$it", 0) }
+            if (late * 100 / n >= 12) upsert("topics/daily-rhythm", "Night owl", "Often on the phone after midnight")
+            val early = (5..7).sumOf { p.getInt("o_h$it", 0) }
+            if (early * 100 / n >= 15) upsert("topics/daily-rhythm", "Early riser", "Often up and using the phone before 8")
+            val we = p.getInt("o_weekend", 0); val wd = p.getInt("o_weekday", 0)
+            if (we + wd >= 20) upsert("topics/daily-rhythm", "Weekends", if (we * 100 / (we + wd) >= 40) "Uses the assistant as much on weekends as on weekdays" else "Mostly a weekday user")
+        }
     }
 
     // ---- Things the assistant learns by doing (no AI call) ----
@@ -221,10 +242,61 @@ object Mem {
         save()
     }
 
+    private val kinds = listOf(
+        "Music and videos" to Regex("\\b(play|song|music|video|youtube|spotify|gaana|playlist|gana)\\b", RegexOption.IGNORE_CASE),
+        "Messaging and calls" to Regex("\\b(call|message|text|sms|whatsapp|reply|dial|email|mail)\\b", RegexOption.IGNORE_CASE),
+        "Navigation and travel" to Regex("\\b(navigate|direction|route|map|distance|nearby|metro|train|flight|cab|uber|ola)\\b", RegexOption.IGNORE_CASE),
+        "News, weather and facts" to Regex("\\b(news|weather|score|match|price|who is|what is|define|meaning)\\b", RegexOption.IGNORE_CASE),
+        "Phone settings" to Regex("\\b(wifi|bluetooth|brightness|volume|dark mode|theme|silent|dnd|torch|flashlight|rotation|timeout|airplane|hotspot|battery)\\b", RegexOption.IGNORE_CASE),
+        "Alarms, timers and reminders" to Regex("\\b(alarm|timer|remind|reminder|schedule|event|calendar|agenda)\\b", RegexOption.IGNORE_CASE),
+        "Shopping and food" to Regex("\\b(order|buy|amazon|flipkart|zomato|swiggy|food|restaurant|recipe)\\b", RegexOption.IGNORE_CASE),
+        "Study and work" to Regex("\\b(exam|study|notes|pdf|meeting|assignment|homework|syllabus|class)\\b", RegexOption.IGNORE_CASE)
+    )
+
+    /** Counts what the user asks the phone to do (kind of job, people they reach, things they search) and files short lines about it. No AI call. */
+    @Synchronized fun noteUse(text: String, who: String = "", topic: String = "") {
+        if (!on()) return
+        val p = sp ?: return
+        val e = p.edit()
+        for ((k, re) in kinds) if (re.containsMatchIn(text)) e.putInt("u_k_$k", p.getInt("u_k_$k", 0) + 1)
+        val w = who.trim().lowercase().take(30)
+        if (w.length >= 2 && w.any { it.isLetter() }) e.putInt("u_c_$w", p.getInt("u_c_$w", 0) + 1)
+        val t = topic.trim().lowercase().take(40)
+        if (t.length >= 3) e.putInt("u_t_$t", p.getInt("u_t_$t", 0) + 1)
+        val n = p.getInt("u_n", 0) + 1
+        e.putInt("u_n", n); e.apply()
+        if (n % 6 != 0) return
+        val all = p.all
+        fun top(prefix: String, min: Int, take: Int) = all.filterKeys { it.startsWith(prefix) }.mapNotNull { (k, v) -> (v as? Int)?.takeIf { it >= min }?.let { k.removePrefix(prefix) to it } }.sortedByDescending { it.second }.take(take)
+        val ks = top("u_k_", 3, 4)
+        if (ks.isNotEmpty()) upsert("topics/phone-habits", "Uses the assistant most for", ks.joinToString(", ") { it.first.lowercase() }, "What the user does with the phone and the assistant, most often first.")
+        val cs = top("u_c_", 2, 5)
+        if (cs.isNotEmpty()) upsert("topics/people-they-reach", "Reaches most often", cs.joinToString(", ") { it.first.replaceFirstChar { c -> c.uppercase() } }, "The people the user calls or messages through the assistant.")
+        val ts = top("u_t_", 2, 6)
+        if (ts.isNotEmpty()) upsert("topics/interests", "Keeps looking up", ts.joinToString(", ") { it.first }, "Subjects the user searches or asks about again and again.")
+    }
+
     @Synchronized fun topApps(n: Int = 3): List<String> {
         val re = Regex("^- (.+?) — opened (\\d+) times?$")
         return files["system/apps"]?.lines?.mapNotNull { re.find(it)?.let { m -> m.groupValues[1] to m.groupValues[2].toInt() } }
             ?.filter { it.second >= 3 }?.sortedByDescending { it.second }?.take(n)?.map { it.first.lowercase() } ?: emptyList()
+    }
+
+    /** People the user reaches most often (two or more times). */
+    fun topContacts(n: Int = 2): List<String> {
+        val p = sp ?: return emptyList()
+        if (!on()) return emptyList()
+        return p.all.filterKeys { it.startsWith("u_c_") }.mapNotNull { (k, v) -> (v as? Int)?.takeIf { it >= 2 }?.let { k.removePrefix("u_c_") to it } }
+            .sortedByDescending { it.second }.take(n).map { it.first.replaceFirstChar { c -> c.uppercase() } }
+    }
+
+    /** Examples for the idle screen that fit this user: their usual apps and people. Empty until something has been learned. */
+    fun suggestions(): List<String> {
+        if (!on()) return emptyList()
+        val out = mutableListOf<String>()
+        topApps(3).forEach { out.add("open $it") }
+        topContacts(2).forEach { out.add("call $it") }
+        return out
     }
 
     // ---- Using memory ----

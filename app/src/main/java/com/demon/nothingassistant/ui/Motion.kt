@@ -34,7 +34,7 @@ import kotlinx.coroutines.delay
 
 /** Words appear one by one, like it is typing as it speaks. The layout is reserved up front, so nothing jumps. */
 @Composable
-fun TypeText(text: String, color: Color, fontSize: TextUnit = 16.sp, textAlign: TextAlign = TextAlign.Center, modifier: Modifier = Modifier) {
+fun TypeText(text: String, color: Color, fontSize: TextUnit = 16.sp, textAlign: TextAlign = TextAlign.Center, modifier: Modifier = Modifier, fontFamily: androidx.compose.ui.text.font.FontFamily? = null, lineHeight: TextUnit = TextUnit.Unspecified) {
     val on = LocalUiStyle.current.typing
     val words = remember(text) { text.split(" ") }
     var n by remember(text) { mutableIntStateOf(if (on) 0 else words.size) }
@@ -51,7 +51,7 @@ fun TypeText(text: String, color: Color, fontSize: TextUnit = 16.sp, textAlign: 
             append(shown)
             withStyle(SpanStyle(color = Color.Transparent)) { append(rest) }
         },
-        color = color, fontSize = fontSize, textAlign = textAlign, modifier = modifier
+        color = color, fontSize = fontSize, textAlign = textAlign, modifier = modifier, fontFamily = fontFamily, lineHeight = lineHeight
     )
 }
 
@@ -74,7 +74,7 @@ fun DotLoader(color: Color, modifier: Modifier = Modifier) {
 @Composable
 fun StatusLine(text: String, color: Color, loading: Boolean, modifier: Modifier = Modifier) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text(text.trimEnd('…', '.', ' '), color = color, fontFamily = FontFamily.Monospace, fontSize = 13.sp, textAlign = TextAlign.Center)
+        Text(text.trimEnd('…', '.', ' '), color = color, fontFamily = NFont.label, fontSize = 13.sp, textAlign = TextAlign.Center)
         if (loading) {
             Spacer(Modifier.width(8.dp))
             DotLoader(color)

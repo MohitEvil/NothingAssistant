@@ -213,7 +213,7 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 
 ## Round 6
 
-- **Voice settings** is now a short list of pages: Speech recognition (with its own Offline languages page), Voices (phone voices, downloadable offline voices, online voices, speed), Wake word and Behaviour. Downloads live only inside the page they belong to.
+- **Voice settings** is now a short list of pages: Speech recognition (with its own Offline languages page), Voices (phone voices, downloadable offline voices, online voices, speed) and Behaviour. Downloads live only inside the page they belong to.
 - **Voice picker** (title + refresh, search, count, radio rows with name / gender / Multi tag, speaker preview, Done) is used for phone voices and for fetched online voices (Edge and other AI voice providers).
 - **Languages on this phone**: only languages that are really downloaded are listed (Android 13+ on-device packs plus every Vosk model). Offline languages come from Vosk's online model list, so any language can be added.
 - **Bilingual Vosk**: two models listen to the same audio and the more confident result wins (Settings: Understand two languages).
@@ -221,12 +221,10 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **Screen vision**: for requests about the screen, and at every step of the screen agent, a screenshot is sent to the AI (toggle: AI sees the screen). "What's on my screen?" is answered from a screenshot.
 - **Default assistant after restart**: re-applied at boot (BootReceiver, app start, accessibility connect) through WRITE_SECURE_SETTINGS (granted once by Shizuku/root) or Shizuku/root, only if you had chosen this app.
 - **Speak to interrupt**: while a reply is spoken the microphone (echo-cancelled) watches for your voice; speaking over it stops the voice and listens.
-- **Wake word**: optional foreground service, volume gate + phrase-only Vosk recogniser, training by recording the phrase three times, sensitivity.
 
 ## Round 7
 
 - **AI agent** (`agent/AiAgent.kt`): for any job that needs the screen, the AI gets a numbered map of everything on screen plus a screenshot, picks one action at a time (tap by id/text/position, type, scroll, scroll-to-find, swipe, system buttons, open app, open settings page, search Settings, any intent, shell), checks whether the screen changed, and recovers (back, another route, Settings search). Never pays; asks before delete/reset. Used by `do_in_apps` and automatically when a normal tap/toggle/setting command fails.
-- **Wake word** is now trained from your own voice (MFCC + dynamic time warping): a 12-prompt Siri-style setup (soft, loud, fast, slow, far, cheerful, sleepy...), live ring visual, test screen. Needs no speech model or download; any phrase, any language.
 - **Voice speed**: long replies from Edge and other file-based voices start after the first sentence while the rest is produced in the background; follow-up listening starts sooner.
 - **Blob**: smoothed voice response and Siri-style aurora lights.
 - **Defaults**: Kilo (free AI) and Edge (free voice) are switched on once automatically.
@@ -234,8 +232,6 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - Vosk catalog also lists the more accurate big models.
 
 ## Round 8
-- **Voice Match** (Voice settings → Wake word): Google/Siri-style setup. Intro, "How it works", then your phrase 5 times and 7 read-aloud sentences. Words light up as they are recognised (offline recogniser if downloaded, otherwise by speaking time), a colour wave follows your voice, each step is checked off, then "You're all set" with a live test showing a Voice Match %.
-- **Speaker check** (`audio/Voiceprint.kt`): learns the cepstral shape and pitch of your voice; the wake word only fires for you. "Only my voice" toggle in Voice settings.
 - **Blob** follows the voice: deep sounds swell the lower half, high sounds the top; it turns only as fast as you speak (`audio/VoiceBands.kt`).
 - **Window**: `service/WindowAnchor.kt` keeps a 1-pixel invisible window while the assistant works so the panel can always reopen; follow-up listening never starts without a visible panel.
 - **AI agent**: retries, longer timeout and real error messages; screenshot only when needed to save rate limit.
@@ -259,7 +255,7 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - From the device log: the speech service found by name failed often (errors 13, 11, 3) while the phone's default recogniser heard Hindi correctly. The default is now tried first, and the route that last gave an answer is remembered and tried first next time.
 
 ## Round 13: welcome, answers, quick answers, stability
-- Welcome setup on first launch: name, microphone, alerts, overlay, accessibility, default assistant and Voice Match, one step at a time, each skippable, with live "allowed" status that refreshes when you return from system settings. Updating users skip it.
+- Welcome setup on first launch: name, microphone, alerts, overlay, accessibility and default assistant, one step at a time, each skippable, with live "allowed" status that refreshes when you return from system settings. Updating users skip it.
 - After every spoken answer the card stays on screen: COPY, SHARE, SAY AGAIN, and follow-ups (tell me more, simpler, shorter, in Hindi). A SPEAK AGAIN button appears after a result or failure.
 - Idle screen: greeting by time of day, four tappable example commands that change through the day, and a box to type a request.
 - New instant offline answers: unit conversion (length, weight, volume, temperature), dice, random number between two numbers, days until a date.
@@ -290,3 +286,15 @@ Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only i
 - **Saying "no" to "did you mean…?"** now tries another way: the rejected item is skipped, the search goes deeper, and the screen agent is asked to find the right one. A wrong contact guess asks who you meant.
 - **Smart listening**: after finished one-shot jobs (switches, volume, timers, calls, playback…) the mic stays closed; it reopens when I asked a question, after a step that usually has a next one (an app just opened), and after answers that invite a reply. Quick facts don't reopen it.
 - Memory is read-only in the app.
+
+## Round 18 — Cleaner, calmer, in Nothing's font
+- **Voice Match and the wake word are gone**, along with their setup page, service, permission, stored files and settings. Old data left by earlier versions is deleted on first start.
+- **No more cut-off answers**: the listening window waits until the answer has finished being spoken (including the moment before sound starts), and interrupt-by-speaking is stricter so the assistant's own voice no longer stops itself.
+- **Smarter auto-listening**: the window stays closed with the screen off or locked, during calls and ringing, while music plays (unless I asked something), and after three unanswered windows in a row. It opens when I ask a question or live listening is on.
+- **Nothing's font**: the app uses the NType font from the phone when Nothing OS has it, or a file placed in app/src/main/assets/fonts/ whose name contains "ntype". Otherwise the usual fonts stay.
+- **Wider memory**: it also notices when you are most active, weekday and weekend habits, what you use the phone for most, the people you reach most, and what you keep looking up.
+- **Faster, lighter**: memory writes are batched into one disk write instead of one per note.
+
+## Round 19 — NType 82 fonts, personal idle suggestions
+- **Nothing's NType 82 is now inside the app** (Regular, Mono, Headline). Regular is the text font, Mono is for small labels, Headline is for the spoken reply, answer cards, the live screen and the voice picker title. Typed text uses it too. Hindi and other scripts the font doesn't hold use the phone's normal font automatically.
+- **Idle suggestions fit you**: the "TRY" chips now include your most-opened apps and the people you reach most, mixed with the usual examples.

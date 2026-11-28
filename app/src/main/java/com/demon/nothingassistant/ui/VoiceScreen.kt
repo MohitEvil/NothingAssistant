@@ -48,7 +48,6 @@ import com.demon.nothingassistant.audio.VoiceHub
 import com.demon.nothingassistant.audio.VoskAsr
 import com.demon.nothingassistant.audio.VoskLang
 import com.demon.nothingassistant.data.Settings
-import com.demon.nothingassistant.service.WakeService
 
 /** Voice settings: a short list of pages instead of one long scroll. Downloads live inside the page they belong to. */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -64,16 +63,12 @@ fun VoiceScreen(
     var page by remember { mutableStateOf("hub") }
     BackHandler(enabled = page != "hub") { page = parent(page) }
 
-    if (page == "wakesetup") {
-        WakeSetup(settings, palette) { page = "wake" }
-        return
-    }
     if (page == "pickphone") {
         PhoneVoicePicker(settings, voice, palette) { page = "voices" }
         return
     }
 
-    val titles = mapOf("hub" to "VOICE", "recog" to "SPEECH RECOGNITION", "vosk" to "OFFLINE LANGUAGES", "voices" to "VOICES", "neural" to "DOWNLOADABLE VOICES", "wake" to "WAKE WORD", "assist" to "BEHAVIOUR")
+    val titles = mapOf("hub" to "VOICE", "recog" to "SPEECH RECOGNITION", "vosk" to "OFFLINE LANGUAGES", "voices" to "VOICES", "neural" to "DOWNLOADABLE VOICES", "assist" to "BEHAVIOUR")
     Column(
         Modifier
             .fillMaxSize()
@@ -83,11 +78,11 @@ fun VoiceScreen(
             .verticalScroll(rememberScrollState())
     ) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("NOTHING ASSISTANT", color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp)
+            Text("NOTHING ASSISTANT", color = palette.muted, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 2.sp)
             Spacer(Modifier.weight(1f))
-            Text("LOG", color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp,
+            Text("LOG", color = palette.muted, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 2.sp,
                 modifier = Modifier.clickable(onClick = onOpenLog).padding(vertical = 8.dp, horizontal = 12.dp))
-            Text("BACK", color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 2.sp,
+            Text("BACK", color = palette.muted, fontFamily = NFont.label, fontSize = 11.sp, letterSpacing = 2.sp,
                 modifier = Modifier.clickable { if (page == "hub") onClose() else page = parent(page) }.padding(vertical = 8.dp, horizontal = 4.dp))
         }
         Spacer(Modifier.height(20.dp))
@@ -98,7 +93,6 @@ fun VoiceScreen(
             "vosk" -> VoskPage(palette)
             "voices" -> VoicesPage(settings, voice, palette, onOpenAiVoice, { page = "pickphone" }, { page = "neural" })
             "neural" -> NeuralPage(settings, voice, palette)
-            "wake" -> WakePage(settings, palette) { page = "wakesetup" }
             "assist" -> AssistPage(settings, voice, palette)
             else -> HubPage(settings, voice, palette, onClose) { page = it }
         }
@@ -106,7 +100,7 @@ fun VoiceScreen(
     }
 }
 
-private fun parent(page: String) = when (page) { "wakesetup" -> "wake"; "vosk" -> "recog"; "pickphone", "neural" -> "voices"; else -> "hub" }
+private fun parent(page: String) = when (page) { "vosk" -> "recog"; "pickphone", "neural" -> "voices"; else -> "hub" }
 
 @Composable
 private fun HubPage(settings: Settings, voice: VoiceHub, palette: GlyphPalette, onClose: () -> Unit, go: (String) -> Unit) {
@@ -127,8 +121,6 @@ private fun HubPage(settings: Settings, voice: VoiceHub, palette: GlyphPalette, 
             settings.deviceVoice.isNotBlank() -> "Phone voice: ${settings.deviceVoice}"
             else -> "Phone voice (automatic)"
         }, palette) { go("voices") }
-        Divider(palette)
-        NavRow(Ic.RADIO, "Wake word", if (settings.wakeWord) "On · \"${settings.wakePhrase}\"" else "Off", palette) { go("wake") }
         Divider(palette)
         NavRow(Ic.SLIDERS, "Behaviour", "Interrupt, voice gender, screen vision, default assistant", palette) { go("assist") }
     }
@@ -228,7 +220,7 @@ private fun RecogPage(settings: Settings, palette: GlyphPalette, openVosk: () ->
         value = settings.sttKey,
         onValueChange = { settings.setSttKey(it.trim()) },
         singleLine = true,
-        textStyle = androidx.compose.ui.text.TextStyle(color = palette.fg, fontSize = 14.sp),
+        textStyle = androidx.compose.ui.text.TextStyle(color = palette.fg, fontSize = 14.sp, fontFamily = NFont.body),
         cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.red),
         decorationBox = { inner ->
             Box { if (settings.sttKey.isBlank()) Text(if (settings.whisperKey().isNotBlank()) "Using your Groq key from the AI settings" else "gsk_… (Groq key)", color = palette.muted, fontSize = 14.sp); inner() }
@@ -265,7 +257,7 @@ private fun VoskPage(palette: GlyphPalette) {
     val vosk = VoskAsr.get(ctx)
     var q by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { if (vosk.catalog.isEmpty()) vosk.fetchCatalog() }
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
 
     @Composable
     fun row(m: VoskLang) {
@@ -386,7 +378,7 @@ private fun PhoneVoicePicker(settings: Settings, voice: VoiceHub, palette: Glyph
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun NeuralPage(settings: Settings, voice: VoiceHub, palette: GlyphPalette) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     val neural = voice.neural
     val selected = VoiceCatalog.byId(settings.voiceModelId)
     Text(
@@ -518,70 +510,6 @@ private fun ProgressBar(progress: Float, palette: GlyphPalette) {
             )
         }
     }
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Wake word
-// ---------------------------------------------------------------------------------------------------------------------
-
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-@Composable
-private fun WakePage(settings: Settings, palette: GlyphPalette, openSetup: () -> Unit) {
-    val ctx = LocalContext.current
-    var tick by remember { mutableStateOf(0) }
-    val trained = remember(tick) { com.demon.nothingassistant.audio.WakeVoice.ready(ctx) }
-    val count = remember(tick) { com.demon.nothingassistant.audio.WakeVoice.sampleCount(ctx) }
-    val hasPrint = remember(tick) { com.demon.nothingassistant.audio.Voiceprint.ready(ctx) }
-    var note by remember { mutableStateOf("") }
-
-    Text(
-        "Say your phrase and I start listening, hands free. I learn your own voice, so it works for any phrase and any language, and needs no download. " +
-            "A tiny volume check runs all the time; only when someone speaks is that short burst compared with your voice. Nothing is recorded or sent anywhere.",
-        color = palette.muted, fontSize = 12.sp
-    )
-    Spacer(Modifier.height(16.dp))
-    Card(palette) {
-        ToggleRow("Wake word", if (!trained) "Set it up first" else if (settings.wakeWord) "Listening for \"${settings.wakePhrase}\"" else "Off", settings.wakeWord, palette) { on ->
-            note = ""
-            if (!on) { settings.setWakeWord(false); WakeService.stop(ctx) }
-            else if (!trained) note = "Teach me your voice first."
-            else if (ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) note = "The microphone permission is needed."
-            else { settings.setWakeWord(true); WakeService.start(ctx) }
-        }
-    }
-    if (note.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(note, color = palette.red, fontSize = 12.sp) }
-
-    Spacer(Modifier.height(22.dp))
-    SectionLabel("YOUR VOICE", palette)
-    Text(if (trained) "\"${settings.wakePhrase}\" · Voice Match ${if (hasPrint) "is on" else "needs setting up again"}." else "Not set up yet.", color = palette.fg, fontSize = 13.sp)
-    Spacer(Modifier.height(10.dp))
-    PillButton(if (trained) "SET UP VOICE MATCH AGAIN" else "SET UP VOICE MATCH", filled = true, palette = palette, modifier = Modifier.fillMaxWidth(), onClick = openSetup)
-    if (trained && hasPrint) {
-        Spacer(Modifier.height(12.dp))
-        Card(palette) {
-            ToggleRow("Only my voice", "Right words from someone else won't wake me", settings.voiceLock, palette) { on ->
-                settings.setVoiceLock(on)
-                if (settings.wakeWord) { WakeService.stop(ctx); WakeService.start(ctx) }
-            }
-        }
-    }
-    if (trained) {
-        Spacer(Modifier.height(10.dp))
-        Chip("DELETE MY VOICE DATA", false, palette) {
-            WakeService.stop(ctx); settings.setWakeWord(false)
-            com.demon.nothingassistant.audio.WakeVoice.clear(ctx); com.demon.nothingassistant.audio.Voiceprint.clear(ctx); tick++
-        }
-    }
-
-    Spacer(Modifier.height(22.dp))
-    SectionLabel("SENSITIVITY", palette)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        listOf("STRICT" to 0.25f, "BALANCED" to 0.5f, "EAGER" to 0.8f).forEach { (n, v) ->
-            Chip(n, settings.wakeSens == v, palette) { settings.setWakeSens(v); if (settings.wakeWord) { WakeService.stop(ctx); WakeService.start(ctx) } }
-        }
-    }
-    Spacer(Modifier.height(8.dp))
-    Text("Strict: fewer false wake-ups. Eager: wakes more easily, even in a noisy room. A small notification stays on while the wake word listens. If a restart stops it, open the app once.", color = palette.muted, fontSize = 11.sp)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

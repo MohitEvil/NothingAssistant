@@ -25,9 +25,9 @@ fun ConfirmContent(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     Column(modifier.fillMaxWidth()) {
-        Text(pending.title, color = palette.fg, fontFamily = mono, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(pending.title, color = palette.fg, fontFamily = mono, fontSize = 16.sp)
         Spacer(Modifier.height(8.dp))
         Text(pending.detail, color = palette.fg, fontSize = 15.sp)
         Spacer(Modifier.height(16.dp))

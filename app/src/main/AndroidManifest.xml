@@ -13,7 +13,6 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
@@ -178,11 +177,6 @@
         <receiver
             android:name=".auto.MacroReceiver"
             android:exported="false" />
-
-        <service
-            android:name=".service.WakeService"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".auto.AwakeService"

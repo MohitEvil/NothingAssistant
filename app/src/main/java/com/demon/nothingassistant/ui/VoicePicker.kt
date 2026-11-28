@@ -56,7 +56,7 @@ fun VoicePicker(
     onPreview: (PickItem) -> Unit,
     onDone: () -> Unit
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     var q by remember { mutableStateOf("") }
     val shown = remember(items, q) {
         val t = q.trim()
@@ -64,7 +64,7 @@ fun VoicePicker(
     }
     Column(Modifier.fillMaxSize().glassBackdrop(palette).systemBarsPadding().padding(horizontal = 20.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, color = palette.fg, fontSize = 26.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text(title, color = palette.fg, fontFamily = NFont.headline, fontSize = 26.sp, modifier = Modifier.weight(1f))
             Box(
                 Modifier.size(44.dp).border(BorderStroke(1.dp, palette.muted.copy(alpha = 0.6f)), CircleShape).clickable(onClick = onRefresh),
                 contentAlignment = Alignment.Center
@@ -76,7 +76,7 @@ fun VoicePicker(
             if (q.isEmpty()) Text("Search voices", color = palette.muted, fontSize = 15.sp)
             BasicTextField(
                 value = q, onValueChange = { q = it }, singleLine = true,
-                textStyle = TextStyle(color = palette.fg, fontSize = 15.sp),
+                textStyle = TextStyle(color = palette.fg, fontSize = 15.sp, fontFamily = NFont.body),
                 cursorBrush = SolidColor(palette.red), modifier = Modifier.fillMaxWidth()
             )
         }
@@ -131,7 +131,7 @@ fun SearchField(value: String, hint: String, palette: GlyphPalette, onChange: (S
         if (value.isEmpty()) Text(hint, color = palette.muted, fontSize = 15.sp)
         BasicTextField(
             value = value, onValueChange = onChange, singleLine = true,
-            textStyle = TextStyle(color = palette.fg, fontSize = 15.sp),
+            textStyle = TextStyle(color = palette.fg, fontSize = 15.sp, fontFamily = NFont.body),
             cursorBrush = SolidColor(palette.red), modifier = Modifier.fillMaxWidth()
         )
     }

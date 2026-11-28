@@ -63,7 +63,7 @@ fun AiScreen(
     onOpenVoiceTab: () -> Unit,
     onClose: () -> Unit
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     val scope = rememberCoroutineScope()
     var selectedId by remember { mutableStateOf<String?>(null) }
     var reorderId by remember { mutableStateOf<String?>(null) }
@@ -435,7 +435,7 @@ internal fun ProviderChip(
     Text(
         text,
         color = if (selected) palette.bg else palette.fg,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = NFont.label,
         fontSize = 12.sp,
         letterSpacing = 1.sp,
         modifier = Modifier
@@ -454,7 +454,7 @@ internal fun SmallAction(text: String, enabled: Boolean, palette: GlyphPalette, 
     Text(
         text,
         color = palette.fg,
-        fontFamily = FontFamily.Monospace,
+        fontFamily = NFont.label,
         fontSize = 11.sp,
         letterSpacing = 1.sp,
         modifier = Modifier
@@ -475,7 +475,7 @@ internal fun AiTabs(selected: Int, palette: GlyphPalette, onOpenChat: () -> Unit
             Text(
                 name,
                 color = if (i == selected) palette.bg else palette.fg,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = NFont.label,
                 fontSize = 12.sp,
                 letterSpacing = 1.sp,
                 modifier = Modifier

@@ -45,7 +45,7 @@ fun PersonaScreen(
     onTestAi: suspend (String) -> String,
     onClose: () -> Unit
 ) {
-    val mono = FontFamily.Monospace
+    val mono = NFont.label
     val scope = rememberCoroutineScope()
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf("") }
@@ -97,7 +97,7 @@ fun PersonaScreen(
             onValueChange = { settings.setAiPersona(it) },
             minLines = 6,
             maxLines = 14,
-            textStyle = TextStyle(color = palette.fg, fontSize = 14.sp),
+            textStyle = TextStyle(color = palette.fg, fontSize = 14.sp, fontFamily = NFont.body),
             cursorBrush = SolidColor(palette.red),
             modifier = Modifier
                 .fillMaxWidth()
